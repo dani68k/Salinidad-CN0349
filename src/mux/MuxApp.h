@@ -1,0 +1,58 @@
+#pragma once
+
+#include <AD5934.h>
+#include <ADG715.h>
+#include <Arduino.h>
+
+class Terminal;
+
+class MuxApp {
+ public:
+  enum class CalibrationPreset : uint8_t { CalHigh100R, CalHigh1K, CalLow1K, CalLow10K };
+  struct Preset {
+    CalibrationPreset id;
+    const char* name;
+    uint8_t mask;
+    uint16_t rfbOhms;
+    uint16_t rcalOhms;
+    const char* description;
+  };
+  using CalibrationInfo = Preset;
+  MuxApp(ADG715& mux, AD5934& impedance, Stream& output);
+  void begin(Terminal& terminal);
+  void reportConnection(bool ready);
+  bool selectPreset(const char* name);
+  bool resolveCalibrationPreset(CalibrationPreset id, CalibrationInfo& info) const;
+  bool calibrationPresetByName(const char* name, CalibrationInfo& info) const;
+  bool applyCalibrationPreset(CalibrationPreset id);
+  bool ping() { return mux_.begin(); }
+  bool readMask(uint8_t& mask) { return mux_.readState(mask); }
+  ADG715::Error lastDriverError() const { return mux_.lastError(); }
+  const char* lastErrorText() const { return ADG715::errorText(mux_.lastError()); }
+  uint8_t lastWireError() const { return mux_.getLastWireError(); }
+  bool knownPresetMask(uint8_t mask) const { return presetByMask(mask) != nullptr; }
+  uint8_t address() const { return mux_.address(); }
+  void update() {}
+
+ private:
+  static const Preset presets_[];
+  static bool dispatch(void* context, char* line, bool busReady, bool busBusy);
+  static bool busy(void*) { return false; }
+  bool process(char* line, bool busReady, bool busBusy);
+  bool setAuthorized(uint8_t mask);
+  bool impedanceIsSafe();
+  void help();
+  void presets();
+  void readState();
+  void status();
+  void printState(uint8_t state);
+  void printSwitches(uint8_t state);
+  void printLastError();
+  void printHex(uint8_t value);
+  const Preset* presetByName(const char* name) const;
+  const Preset* presetByMask(uint8_t mask) const;
+  static bool parseHex(const char* text, uint8_t& value);
+  ADG715& mux_;
+  AD5934& impedance_;
+  Stream& output_;
+};
