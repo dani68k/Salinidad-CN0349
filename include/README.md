@@ -10,3 +10,15 @@ Si se cambia `SERIAL_BAUD`, sincronizar también `monitor_speed` en `platformio.
 decodificación DFT con signo, magnitud, fase, límites/acumulación de barrido y
 frecuencia efectiva, compartidas por el driver, ImpedanceApp y pruebas host.
 `impedance_diagnostics.h` define códigos tipados y el registro RAM del último fallo: subsistema, fase, timestamp millis, detalle, recuperabilidad y estado de recuperación. Se comparte entre ImpedanceApp y las pruebas Unity; los contadores viven en ImpedanceApp.
+
+## Hito 2C.1
+
+`config.h` identifica firmware 0.9.0 / hito 2C.1. Se conservan bus, pines, baudios
+y timeout. La matemática específica Pt100 vive en `src/cn0349/ImpedanceMath.h`.
+
+## Hito 2E.3
+
+`EC_NOMINAL_CELL_CONSTANT_PER_CM = 1.0` y `EC_NOMINAL_R2_OHMS = 100.0`
+identifican parámetros nominales del modelo EC. Son constantes de compilación,
+no parámetros calibrados ni correcciones automáticas; el módulo
+`src/conductivity/` las recibe mediante el Manager.

@@ -1,5 +1,20 @@
 # ImpedanceApp — diagnóstico y adquisición AD5934
 
+Actualización 2026-10-27: `requestPt100(busReady, quiet=false)` permite omitir
+mensajes informativos en una adquisición continua. La opción se guarda por
+operación y se restablece en cada inicio. Suprime el aviso de inicio y el informe
+RAW/standby correcto, y se propaga a la selección RTD de MuxApp. Los errores,
+comprobaciones de hardware, estados y datos adquiridos se conservan. Las
+adquisiciones manuales siguen siendo verbosas por defecto.
+
+Hito 2E.1, 2026-10-27: `requestEc(busReady, mask)` acepta únicamente las rutas
+EC definidas por MuxApp (`0x81` y `0x82`). `startMeasurement` recibe la máscara
+de ruta para escoger RTD, EC o preset de calibración; todas usan el mismo estado
+DFT, readback, errores y standby. `Result::calibration` conserva la ruta
+efectivamente aplicada para la comprobación posterior del Manager. No hay
+duplicación del driver, offsets ni cálculo de conductividad. Errores de ruta
+siguen el flujo de recuperación existente.
+
 `ImpedanceApp` enlaza comandos serie, driver AD5934 y `MuxApp`. Coordina la
 selección configurable del preset de calibración permitido, programación de
 perfil, adquisición DFT y recuperación a standby. El driver sigue siendo
@@ -109,9 +124,26 @@ diag/recover pueden hacer varias en un handler. Fases de control/configuración
 expiran a 1500 ms y DFT a 500 ms. Esta versión no incorpora mocks de fallos ni
 validación física 1E.
 
+En Hito 2A, `CN0349Manager` usa esta instancia como único motor. `configure*`,
+`request*`, cancelación, resultados y estado son wrappers sobre las estructuras y
+máquina ya existentes. La terminal heredada sigue conectada aquí; los comandos
+`cn0349` se despachan al Manager. Ver [`src/cn0349/README.md`](../cn0349/README.md).
+
 La secuencia sigue la [Figura 24 del datasheet Rev. E](https://www.analog.com/media/en/technical-documentation/data-sheets/ad5934.pdf).
 MCLK 1 MHz y la frecuencia 2 kHz corresponden al oscilador del circuito
 [CN-0349 Rev. A](https://www.analog.com/media/en/reference-design-documentation/reference-designs/cn0349.pdf).
 Las pruebas 1D.1 están en [`test/hito1d1.md`](../../test/hito1d1.md); los cuatro
 presets configurables y los dos puntos por rango se validan según
 [`test/hito1d1b.md`](../../test/hito1d1b.md).
+
+## Hito 2C.1
+
+`requestPt100(busReady)` entra en la misma máquina single mediante un argumento
+explícito de ruta. MuxApp resuelve y aplica RTD con readback; no se introduce
+estado persistente de ruta que pueda afectar a single/sweep/calibraciones
+posteriores. El resultado RAW conserva metadatos RTD (ID de calibración no
+aplicable, 0xFF). `pt100Info()` expone esos metadatos al Manager.
+Se reinicia `cancelled_` al iniciar una adquisición nueva: una cancelación anterior
+no debe cancelar conversiones posteriores. El test host reproduce esa regresión.
+El final solo publica DFT válido tras confirmar standby. La conversión a ohmios
+pertenece al Manager; ver [modelo Pt100](../../docs/pt100-route.md).

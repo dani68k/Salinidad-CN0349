@@ -1,5 +1,18 @@
 # MuxApp — control seguro del CN-0349 (Hito 1C)
 
+Actualización 2026-10-27: `selectPreset`, `applyPt100` y el método interno
+`setAuthorized` admiten `quiet=false`. La adquisición continua activa esta opción
+para omitir solo los mensajes informativos de ruta ya confirmada o escritura
+correcta. Las lecturas, validaciones, escritura/readback y mensajes de error
+siguen ejecutándose. Los comandos manuales conservan su salida por defecto.
+
+Hito 2E.1, 2026-10-27: `ecInfo(mask, info)` limita las nuevas solicitudes a
+`0x81` (MEASURE_HIGH, RFB 100 ohm) y `0x82` (MEASURE_LOW, RFB 1 kohm).
+`applyEc(mask)` reutiliza `selectPreset`, con lectura previa y verificación
+posterior del ADG715. La tabla de máscaras ya existía. El readback solo confirma
+estado digital; consultar [modelo eléctrico](../../docs/ec-route.md) antes de
+interpretar R2, continuidad analógica o resistencia externa.
+
 `MuxApp` adapta el driver ADG715 a las rutas documentadas de EVAL-CN0349-PMDZ.
 Solo acepta máscaras autorizadas y lee el AD5934 antes de conmutar: exige
 power-down (`0xA`) o standby (`0xB`) y Control Low=`0x08`. No modifica el AD5934.
@@ -85,3 +98,14 @@ general ADG715 sin duplicar la metadata de resistencias en ImpedanceApp. El
 driver AD5934 genérico no depende de ADG715.
 
 En Hito 1E MuxApp también expone `ping`, `readMask`, `address`, error técnico y consulta de máscara conocida a ImpedanceApp. La recuperación deliberadamente no conmuta el multiplexor ni cambia el preset: lee y conserva la máscara existente. El diagnóstico integrado solo identifica si la máscara coincide con un estado autorizado; no mide la ruta eléctrica. Consultar [`test/hito1e.md`](../../test/hito1e.md).
+
+En 2A, MuxApp conserva la última máscara obtenida por lectura o escritura
+verificada. CN0349Manager usa ese dato cacheado para distinguir preset solicitado
+del aplicado, sin I²C oculto en `getStatus()`.
+
+## Hito 2C.1
+
+`pt100Info()` y `applyPt100()` reutilizan el preset histórico RTD/0x41 y su
+interlock/readback. RTD sigue sin ser un preset RCAL; no cambia la enumeración de
+las cuatro calibraciones 2B. La API de medida del Manager solo solicita esta ruta,
+sin añadir selección de conductividad. [Revisión del circuito](../../docs/pt100-route.md).

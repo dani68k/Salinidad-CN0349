@@ -13,12 +13,13 @@ const Terminal::Command Terminal::commands_[] = {
 
 Terminal::Terminal(Stream& serial, TwoWire& wire) : serial_(serial), wire_(wire) {}
 
-void Terminal::attachModule(void* context, ModuleHandler handler, ModuleBusy busy, const char* help) {
+bool Terminal::attachModule(void* context, ModuleHandler handler, ModuleBusy busy, const char* help) {
   if (moduleCount_ >= MAX_MODULES) {
     serial_.println("Error: se alcanzo el maximo de modulos del terminal.");
-    return;
+    return false;
   }
   modules_[moduleCount_++] = Module{context, handler, busy, help};
+  return true;
 }
 
 bool Terminal::moduleBusy() const {

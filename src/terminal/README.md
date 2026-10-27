@@ -11,8 +11,8 @@ facilitar su lectura en monitores serie.
 - `update()`: consume hasta 32 bytes disponibles y realiza como máximo un sondeo.
 - `printInfo()`: imprime identidad y parámetros configurados, sin acceder al bus.
 - `attachModule(context, handler, busy, help)`: registra un módulo mediante
-  callbacks, sin que el terminal dependa de su driver. Hay dos espacios
-  estáticos para ImpedanceApp y MuxApp; un registro adicional se rechaza.
+  callbacks, sin que el terminal dependa de su driver. Hay tres espacios
+  estáticos para ImpedanceApp, MuxApp y CN0349Manager; un cuarto se rechaza.
 
 Se usa `Serial` en producción. Los handlers y descripciones están en `commands_`;
 para ampliar comandos se añade un método y una entrada en esa tabla. `help` y

@@ -89,3 +89,49 @@ Desconectar un esclavo normalmente produce NACK; no demuestra un timeout ni
 un fallo de inicialización. Estas rutas no se han validado físicamente.
 
 Para Hito 1E, usar [`hito1e.md`](hito1e.md): modelo de errores, diagnóstico, stop, recuperación y pruebas de fault paths. En 0.6.0 el build ESP32 compila; el test nativo se intentó pero gcc/g++ no están disponibles y las pruebas físicas están pendientes.
+
+Para Hito 2A, usar [`hito2a.md`](hito2a.md) para API/terminal manager, resultados
+DFT y compatibilidad con comandos heredados. El build ESP32 compila; no hay aún
+mock de aplicación/TwoWire ni validación física 0.7.0.
+
+Para Hito 2B, consultar [`hito2b.md`](hito2b.md). La compilación ESP32-S3 pasó; las mediciones de calibración en placa y la repetibilidad permanecen pendientes. La salida de compilación no valida GF ni la ruta analógica.
+
+## Hito 2C.1
+
+[Procedimiento físico y matriz de resultados pendientes](hito2c1.md).
+[Suite host MSVC con I²C simulado](host_cn0349/README.md): tres grupos PASS;
+PlatformIO native no ejecutable por falta de gcc/g++. La simulación no valida
+resistencias externas ni exactitud analógica.
+
+[Hoja de trabajo: cinco medidas por combinación, salidas y comentarios](hito2c.1_testing.md).
+
+Estado 2026-10-27: validación física 2C.1 cerrada con la serie de veinte medidas y sus límites en [hito2c.1_testing.md](hito2c.1_testing.md).
+
+## Hito 2D — 2026-10-27
+
+[Pruebas Pt100 puras](test_pt100/README.md): tres grupos Unity, ocho referencias
+IEC completas, continuidad y errores. [Suite host](host_cn0349/README.md): cuatro
+grupos con regresiones y temperatura, errores propagados y calibración inmutable.
+`host_cn0349\run_math.cmd` ejecuta las suites Unity Pt100 y AD5934 con MSVC:
+14 pruebas PASS. `host_cn0349\run.cmd`: cuatro grupos PASS.
+PlatformIO native sigue sin gcc/g++; no se afirma PASS por esa vía.
+[Protocolo físico y evidencias software](hito2d.md): validación física pendiente.
+
+Preparación automática de arranque, 2026-10-27: `host_cn0349\run.cmd` amplía
+la cobertura a cinco grupos PASS. Incluye recover seguido de cuatro calibraciones,
+medida posterior, cancelación y fallos. En placa queda pendiente verificar que
+tras un encendido aparece el anuncio de preparación completa, los cuatro slots
+de `cn0349 cal list` son válidos y `cn0349 temperature start` inicia una medida
+sin preparación manual. Registrar salida de arranque completa y nuevos IDs/GF;
+los valores deben proceder de cada calibración, sin ajustes empíricos.
+
+Hito 2E.1, 2026-10-27: [plan de 40 adquisiciones y análisis pendiente](hito2e1.md).
+La suite host incorpora EC HIGH/LOW y conserva regresiones RTD/temperatura:
+siete grupos PASS. La compilación ESP32-S3 es SUCCESS. No se presenta una
+caracterización eléctrica hasta ejecutar la matriz en placa y revisar R2.
+
+Registro físico 2E.1: [40 adquisiciones A–H y conclusión](hito2e1.md).
+
+Hitos 2E.2/2E.3, 2026-10-27: [protocolo para sonda EC real y estimación de
+conductividad](hito2e2.md). Software host y compilación ESP32-S3 completados;
+ensayos físicos con líquidos pendientes. 2E.4 reserva patrones y validación.

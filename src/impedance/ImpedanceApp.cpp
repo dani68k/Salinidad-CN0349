@@ -341,6 +341,11 @@ void ImpedanceApp::write(uint8_t reg, uint8_t width, uint32_t value) {
   printValue(reg, width, actual);
   output_.println((actual & mask) == value ? "Escritura verificada en bits definidos." :
                   "Error: la relectura no coincide; configuracion no confirmada.");
+  if ((reg >= AD5934::START_FREQUENCY_MSB && reg <= AD5934::SETTLING_CYCLES_LSB) &&
+      (actual & mask) == value) {
+    publicStatus_.configurationVerified = false;
+    publicStatus_.diagnosticComplete = false;
+  }
 }
 
 void ImpedanceApp::status() {
@@ -378,6 +383,91 @@ void ImpedanceApp::refreshPublicStatus() {
       publicStatus_.adg715Communication && publicStatus_.configurationVerified &&
       publicStatus_.operational && publicStatus_.diagnosticComplete &&
       publicStatus_.adg715MaskKnown;
+}
+
+ImpedanceApp::ImpedanceStatus ImpedanceApp::statusSnapshot() const {
+  ImpedanceStatus snapshot = publicStatus_;
+  snapshot.busy = isBusy();
+  snapshot.pointsCompleted = sweepPointCount_;
+  snapshot.pointsExpected = sweepTargetPoints_;
+  snapshot.elapsedMs = snapshot.busy ? millis() - measurementStartedMs_ :
+      (sweepMode_ ? sweepElapsedMs_ : measurementElapsedMs_);
+  snapshot.lastError = lastErrorRecord_.code;
+  if (mux_.hasObservedMask()) {
+    snapshot.adg715Mask = mux_.observedMask();
+    snapshot.adg715MaskKnown = true;
+  }
+  snapshot.hardwareReady = snapshot.ad5934Communication && snapshot.adg715Communication &&
+      snapshot.configurationVerified && snapshot.operational && snapshot.diagnosticComplete &&
+      snapshot.adg715MaskKnown;
+  return snapshot;
+}
+
+bool ImpedanceApp::setRequestedPreset(MuxApp::CalibrationPreset preset) {
+  if (isBusy()) return false;
+  MuxApp::CalibrationInfo info{};
+  if (!mux_.resolveCalibrationPreset(preset, info)) return false;
+  profile_.calibrationPreset = preset;
+  return true;
+}
+
+bool ImpedanceApp::configureSingle(MuxApp::CalibrationPreset preset, uint32_t frequencyHz,
+                                   uint16_t settlingCycles) {
+  if (isBusy() || settlingCycles > 511) return false;
+  uint32_t code = 0;
+  MuxApp::CalibrationInfo info{};
+  if (!AD5934::frequencyToCode(frequencyHz, profile_.mclkHz, code) ||
+      !mux_.resolveCalibrationPreset(preset, info)) return false;
+  profile_.calibrationPreset = preset;
+  profile_.frequencyHz = frequencyHz;
+  profile_.settlingCycles = settlingCycles;
+  return true;
+}
+
+bool ImpedanceApp::configureSweep(MuxApp::CalibrationPreset preset, uint32_t startHz,
+                                  uint32_t stepHz, uint16_t increments,
+                                  uint16_t settlingCycles) {
+  if (isBusy() || settlingCycles > 511) return false;
+  MuxApp::CalibrationInfo info{};
+  uint32_t end = 0, startCode = 0, stepCode = 0;
+  const uint32_t maxHz = profile_.mclkHz / 16 < AD5934::MAX_OUTPUT_FREQUENCY_HZ ?
+      profile_.mclkHz / 16 : AD5934::MAX_OUTPUT_FREQUENCY_HZ;
+  if (!mux_.resolveCalibrationPreset(preset, info) ||
+      !AD5934Math::validateSweep(startHz, stepHz, increments, MAX_SWEEP_POINTS, maxHz, end) ||
+      !AD5934::frequencyToCode(startHz, profile_.mclkHz, startCode)) return false;
+  if (increments == 0 && stepHz == 0) stepCode = 0;
+  else if (!AD5934::frequencyToCode(stepHz, profile_.mclkHz, stepCode)) return false;
+  if (!AD5934Math::validSweepDdsCodes(startCode, stepCode, increments)) return false;
+  sweepConfig_ = SweepConfig{startHz, stepHz, increments};
+  profile_.calibrationPreset = preset;
+  profile_.settlingCycles = settlingCycles;
+  return true;
+}
+
+bool ImpedanceApp::cancelOperation() {
+  if (!isBusy()) return false;
+  failMeasurement("cancelada por Manager", true);
+  return true;
+}
+
+bool ImpedanceApp::runDiagnostics(bool busReady) {
+  if (!busReady || isBusy()) return false;
+  diagnostics();
+  return statusSnapshot().hardwareReady;
+}
+
+bool ImpedanceApp::requestRecovery(bool busReady) {
+  if (!busReady || isBusy()) return false;
+  recover();
+  return statusSnapshot().hardwareReady;
+}
+
+bool ImpedanceApp::presetInfoForMask(uint8_t mask, MuxApp::CalibrationInfo& info) const {
+  for (uint8_t index = 0; index < 4; ++index) {
+    const auto preset = static_cast<MuxApp::CalibrationPreset>(index);
+    if (mux_.resolveCalibrationPreset(preset, info) && info.mask == mask) return true;
+  }
+  return false;
 }
 
 void ImpedanceApp::integratedStatus() {
@@ -580,9 +670,10 @@ void ImpedanceApp::failMeasurement(const char* message, bool recover) {
   else setMeasurementState(MeasurementState::Error);
 }
 
-bool ImpedanceApp::startMeasurement(bool busReady, bool sweep) {
+bool ImpedanceApp::startMeasurement(bool busReady, bool sweep, uint8_t routeMask, bool quiet) {
   if (!busReady) { output_.println("Error: bus I2C no inicializado."); return false; }
   if (busy(this)) { output_.println("Error: ya hay una operacion AD5934 activa."); return false; }
+  measurementQuiet_ = quiet;
   refreshPublicStatus();
   if (!publicStatus_.hardwareReady) {
     recordError(ImpedanceDiagnostics::ErrorCode::InvalidState, ImpedanceDiagnostics::Subsystem::Application,
@@ -611,7 +702,9 @@ bool ImpedanceApp::startMeasurement(bool busReady, bool sweep) {
     activeIncrements_ = 0;
   }
   MuxApp::CalibrationInfo selectedCalibration{};
-  if (!mux_.resolveCalibrationPreset(profile_.calibrationPreset, selectedCalibration)) {
+  if (!(routeMask == 0x41 ? mux_.pt100Info(selectedCalibration) :
+      routeMask == 0x81 || routeMask == 0x82 ? mux_.ecInfo(routeMask, selectedCalibration) :
+      mux_.resolveCalibrationPreset(profile_.calibrationPreset, selectedCalibration))) {
     output_.println("Error: preset de calibracion no permitido."); return false;
   }
   if (!profile_.externalClock || profile_.excitationRange != 1 || profile_.pgaGain != 1 ||
@@ -634,6 +727,7 @@ bool ImpedanceApp::startMeasurement(bool busReady, bool sweep) {
     sweepElapsedMs_ = 0;
     sweepError_ = nullptr;
   }
+  cancelled_ = false;  // A new acquisition must not inherit a previous cancellation.
   measurementStartedMs_ = millis();
   measurementElapsedMs_ = 0;
   if (!driver_.begin()) { failMeasurement("fallo de comunicacion AD5934", true); return false; }
@@ -666,7 +760,9 @@ bool ImpedanceApp::startMeasurement(bool busReady, bool sweep) {
     return false;
   }
   publicStatus_.diagnosticComplete = true;
-  if (!mux_.applyCalibrationPreset(profile_.calibrationPreset)) {
+  if (!(routeMask == 0x41 ? mux_.applyPt100(quiet) :
+      routeMask == 0x81 || routeMask == 0x82 ? mux_.applyEc(routeMask) :
+      mux_.applyCalibrationPreset(profile_.calibrationPreset))) {
     output_.println("No se inicia DFT porque fallo la seleccion/readback ADG715; se verificara standby.");
     failMeasurement("no se pudo aplicar/verificar preset de calibracion", true);
     return false;
@@ -682,7 +778,7 @@ bool ImpedanceApp::startMeasurement(bool busReady, bool sweep) {
   verifyPhase_ = 0;
   setMeasurementState(MeasurementState::Configuring);
   publicStatus_.lastOperationSuccessful = false;
-  output_.println(sweep ? "Barrido DFT iniciado; configurando registros verificados." :
+  if (!measurementQuiet_) output_.println(sweep ? "Barrido DFT iniciado; configurando registros verificados." :
                           "Adquisicion DFT unica iniciada; configurando registros verificados.");
   return true;
 }
@@ -766,13 +862,22 @@ void ImpedanceApp::finishStopping() {
       output_.println(" puntos; AD5934 en standby.");
       publicStatus_.lastOperationSuccessful = sweepComplete_;
     } else {
-      result_ = Result{pendingReal_, result_.imaginary, 0, profile_.frequencyHz, measurementElapsedMs_, measurementCalibration_};
+      result_ = Result{};
+      result_.real = pendingReal_;
+      result_.imaginary = pendingImaginary_;
+      result_.frequencyHz = profile_.frequencyHz;
+      result_.effectiveFrequencyHz = AD5934Math::frequencyFromCode(startCode_, profile_.mclkHz);
+      result_.elapsedMs = measurementElapsedMs_;
+      result_.calibration = measurementCalibration_;
       result_.magnitude = AD5934::magnitude(result_.real, result_.imaginary);
+      result_.phaseDegrees = AD5934Math::phaseDegrees(result_.real, result_.imaginary);
       result_.valid = true;
       hasResult_ = true;
       setMeasurementState(MeasurementState::Complete);
-      printOutput();
-      output_.println("AD5934 finalizado en standby.");
+      if (!measurementQuiet_) {
+        printOutput();
+        output_.println("AD5934 finalizado en standby.");
+      }
       publicStatus_.lastOperationSuccessful = true;
     }
   }
@@ -865,7 +970,8 @@ void ImpedanceApp::advanceMeasurement() {
       setMeasurementState(MeasurementState::ReadingImaginary);
       return;
     case MeasurementState::ReadingImaginary:
-      if (!driver_.readImaginary(result_.imaginary)) { failMeasurement("fallo leyendo IMAG", true); return; }
+      if (!driver_.readImaginary(pendingImaginary_)) { failMeasurement("fallo leyendo IMAG", true); return; }
+      result_.imaginary = pendingImaginary_;
       measurementError_ = nullptr;
       if (sweepMode_) {
         const uint32_t ddsCode = startCode_ + incrementCode_ * sweepCurrentIndex_;

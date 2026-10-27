@@ -21,12 +21,18 @@ class MuxApp {
   MuxApp(ADG715& mux, AD5934& impedance, Stream& output);
   void begin(Terminal& terminal);
   void reportConnection(bool ready);
-  bool selectPreset(const char* name);
+  bool selectPreset(const char* name, bool quiet = false);
   bool resolveCalibrationPreset(CalibrationPreset id, CalibrationInfo& info) const;
   bool calibrationPresetByName(const char* name, CalibrationInfo& info) const;
+  bool pt100Info(CalibrationInfo& info) const;
+  bool applyPt100(bool quiet = false);
+  bool ecInfo(uint8_t mask, CalibrationInfo& info) const;
+  bool applyEc(uint8_t mask);
   bool applyCalibrationPreset(CalibrationPreset id);
   bool ping() { return mux_.begin(); }
-  bool readMask(uint8_t& mask) { return mux_.readState(mask); }
+  bool readMask(uint8_t& mask);
+  bool hasObservedMask() const { return hasObservedMask_; }
+  uint8_t observedMask() const { return observedMask_; }
   ADG715::Error lastDriverError() const { return mux_.lastError(); }
   const char* lastErrorText() const { return ADG715::errorText(mux_.lastError()); }
   uint8_t lastWireError() const { return mux_.getLastWireError(); }
@@ -39,7 +45,7 @@ class MuxApp {
   static bool dispatch(void* context, char* line, bool busReady, bool busBusy);
   static bool busy(void*) { return false; }
   bool process(char* line, bool busReady, bool busBusy);
-  bool setAuthorized(uint8_t mask);
+  bool setAuthorized(uint8_t mask, bool quiet = false);
   bool impedanceIsSafe();
   void help();
   void presets();
@@ -55,4 +61,6 @@ class MuxApp {
   ADG715& mux_;
   AD5934& impedance_;
   Stream& output_;
+  bool hasObservedMask_ = false;
+  uint8_t observedMask_ = 0;
 };

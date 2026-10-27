@@ -5,8 +5,8 @@
 
 namespace Config {
 constexpr char FIRMWARE_NAME[] = "ATLANTES CN-0349";
-constexpr char FIRMWARE_VERSION[] = "0.6.0";
-constexpr char MILESTONE[] = "1E";
+constexpr char FIRMWARE_VERSION[] = "0.9.0";
+constexpr char MILESTONE[] = "2C.1";
 constexpr uint32_t SERIAL_BAUD = 115200;
 constexpr int I2C_SDA_PIN = 4;
 constexpr int I2C_SCL_PIN = 5;
@@ -14,6 +14,8 @@ constexpr uint32_t I2C_FREQUENCY_HZ = 100000;
 constexpr uint16_t I2C_TIMEOUT_MS = 25;
 constexpr uint8_t AD5934_ADDRESS = 0x0D;
 constexpr uint8_t ADG715_ADDRESS = 0x48;
+constexpr float EC_NOMINAL_CELL_CONSTANT_PER_CM = 1.0f;
+constexpr float EC_NOMINAL_R2_OHMS = 100.0f;
 constexpr uint8_t I2C_FIRST_ADDRESS = 0x08;
 constexpr uint8_t I2C_LAST_ADDRESS = 0x77;
 constexpr size_t TERMINAL_BUFFER_SIZE = 96;  // 95 caracteres y terminador NUL.

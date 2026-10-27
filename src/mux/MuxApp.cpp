@@ -30,7 +30,7 @@ void MuxApp::reportConnection(bool ready) {
   if (!ready) printLastError();
 }
 
-bool MuxApp::selectPreset(const char* name) {
+bool MuxApp::selectPreset(const char* name, bool quiet) {
   const Preset* preset = presetByName(name);
   if (!preset) {
     output_.print("Error: preset ADG715 desconocido: ");
@@ -38,11 +38,12 @@ bool MuxApp::selectPreset(const char* name) {
     return false;
   }
   uint8_t actual;
-  if (!mux_.readState(actual)) {
+  if (!readMask(actual)) {
     printLastError();
     return false;
   }
   if (actual == preset->mask) {
+    if (quiet) return true;
     output_.print("ADG715 ya confirma ");
     output_.print(preset->name);
     output_.print(" ");
@@ -50,7 +51,14 @@ bool MuxApp::selectPreset(const char* name) {
     output_.println(".");
     return true;
   }
-  return setAuthorized(preset->mask);
+  return setAuthorized(preset->mask, quiet);
+}
+
+bool MuxApp::readMask(uint8_t& mask) {
+  if (!mux_.readState(mask)) return false;
+  observedMask_ = mask;
+  hasObservedMask_ = true;
+  return true;
 }
 
 bool MuxApp::resolveCalibrationPreset(CalibrationPreset id, CalibrationInfo& info) const {
@@ -171,7 +179,7 @@ void MuxApp::printState(uint8_t state) {
 
 void MuxApp::readState() {
   uint8_t state;
-  if (!mux_.readState(state)) { printLastError(); return; }
+  if (!readMask(state)) { printLastError(); return; }
   printState(state);
 }
 
@@ -191,7 +199,7 @@ void MuxApp::status() {
   printHex(mux_.address());
   output_.println();
   uint8_t actual;
-  if (mux_.readState(actual)) printState(actual);
+  if (readMask(actual)) printState(actual);
   else printLastError();
   output_.print("Ultimo estado solicitado: ");
   if (mux_.hasRequestedState()) printHex(mux_.lastRequestedState());
@@ -222,7 +230,7 @@ bool MuxApp::impedanceIsSafe() {
   return true;
 }
 
-bool MuxApp::setAuthorized(uint8_t mask) {
+bool MuxApp::setAuthorized(uint8_t mask, bool quiet) {
   const Preset* preset = presetByMask(mask);
   if (!preset) {
     output_.print("Rechazado: mascara no autorizada para CN-0349: ");
@@ -236,6 +244,9 @@ bool MuxApp::setAuthorized(uint8_t mask) {
     output_.println("Estado solicitado y ultimo estado confirmado permanecen diferenciados.");
     return false;
   }
+  observedMask_ = mask;
+  hasObservedMask_ = true;
+  if (quiet) return true;
   output_.print("Solicitado ");
   output_.print(preset->name);
   output_.print(" ");
@@ -296,4 +307,24 @@ bool MuxApp::process(char* line, bool busReady, bool busBusy) {
     output_.println("Rechazado: control individual deshabilitado en la aplicacion CN-0349.");
   }
   return true;
+}
+
+// Reuse the existing RTD route; it is not an RCAL calibration preset.
+bool MuxApp::pt100Info(CalibrationInfo& info) const {
+  const Preset* preset = presetByName("RTD");
+  if (!preset) return false;
+  info = *preset;
+  return true;
+}
+bool MuxApp::applyPt100(bool quiet) { return selectPreset("RTD", quiet); }
+bool MuxApp::ecInfo(uint8_t mask, CalibrationInfo& info) const {
+  if (mask != 0x81 && mask != 0x82) return false;
+  const Preset* preset = presetByMask(mask);
+  if (!preset) return false;
+  info = *preset;
+  return true;
+}
+bool MuxApp::applyEc(uint8_t mask) {
+  CalibrationInfo info{};
+  return ecInfo(mask, info) && selectPreset(info.name);
 }

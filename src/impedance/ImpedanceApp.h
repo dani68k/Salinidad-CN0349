@@ -36,6 +36,7 @@ class ImpedanceApp {
     int16_t imaginary = 0;
     double magnitude = 0;
     uint32_t frequencyHz = 0;
+    double effectiveFrequencyHz = 0;
     uint32_t elapsedMs = 0;
     MuxApp::CalibrationInfo calibration{};
     uint16_t index = 0;
@@ -75,6 +76,39 @@ class ImpedanceApp {
   void reportConnection(bool ready);
   void update();
   const ImpedanceStatus& publicStatus() const { return publicStatus_; }
+  bool isBusy() const { return busy(const_cast<ImpedanceApp*>(this)); }
+  MeasurementState measurementState() const { return measurementState_; }
+  const Profile& profile() const { return profile_; }
+  const SweepConfig& sweepConfiguration() const { return sweepConfig_; }
+  const SweepConfig& activeSweepConfiguration() const { return activeSweepConfig_; }
+  MuxApp::CalibrationPreset activeSweepPreset() const { return activeSweepCalibration_.id; }
+  uint16_t activeSweepSettling() const { return activeSweepSettling_; }
+  bool currentIsSweep() const { return sweepMode_; }
+  bool hasSingleResult() const { return hasResult_ && result_.valid; }
+  bool singleResult(Result& result) const { if (!hasSingleResult()) return false; result = result_; return true; }
+  bool hasSweepResult() const { return hasSweep_; }
+  bool sweepComplete() const { return sweepComplete_; }
+  uint16_t sweepPointCount() const { return sweepPointCount_; }
+  uint16_t sweepPointTarget() const { return sweepTargetPoints_; }
+  bool sweepPoint(uint16_t index, SweepPoint& point) const { if (index >= sweepPointCount_) return false; point = sweepPoints_[index]; return true; }
+  ImpedanceStatus statusSnapshot() const;
+  bool configureSingle(MuxApp::CalibrationPreset preset, uint32_t frequencyHz, uint16_t settlingCycles);
+  bool configureSweep(MuxApp::CalibrationPreset preset, uint32_t startHz, uint32_t stepHz,
+                      uint16_t increments, uint16_t settlingCycles);
+  bool setRequestedPreset(MuxApp::CalibrationPreset preset);
+  bool requestSingle(bool busReady) { return startMeasurement(busReady, false); }
+  bool requestPt100(bool busReady, bool quiet = false) { return startMeasurement(busReady, false, 0x41, quiet); }
+  bool pt100Info(MuxApp::CalibrationInfo& info) const { return mux_.pt100Info(info); }
+  bool ecInfo(uint8_t mask, MuxApp::CalibrationInfo& info) const { return mux_.ecInfo(mask, info); }
+  bool requestEc(bool busReady, uint8_t mask) { return startMeasurement(busReady, false, mask); }
+  bool requestSweep(bool busReady) { return startMeasurement(busReady, true); }
+  bool cancelOperation();
+  bool runDiagnostics(bool busReady);
+  bool requestRecovery(bool busReady);
+  bool presetInfo(MuxApp::CalibrationPreset preset, MuxApp::CalibrationInfo& info) const { return mux_.resolveCalibrationPreset(preset, info); }
+  bool presetInfoForMask(uint8_t mask, MuxApp::CalibrationInfo& info) const;
+  bool hasObservedMuxMask() const { return mux_.hasObservedMask(); }
+  uint8_t observedMuxMask() const { return mux_.observedMask(); }
 
  private:
   static bool dispatch(void* context, char* line, bool busReady, bool busBusy);
@@ -95,7 +129,7 @@ class ImpedanceApp {
   void sweepResult();
   void printSweepPoint(const SweepPoint& point);
   void printCalibration(const MuxApp::CalibrationInfo& calibration);
-  bool startMeasurement(bool busReady, bool sweep = false);
+  bool startMeasurement(bool busReady, bool sweep = false, uint8_t routeMask = 0, bool quiet = false);
   bool validateSweep(uint32_t& finalHz, uint32_t& startCode, uint32_t& incrementCode) const;
   void advanceMeasurement();
   void failMeasurement(const char* message, bool recover);
@@ -145,6 +179,7 @@ class ImpedanceApp {
   MuxApp::CalibrationInfo measurementCalibration_{};
   MuxApp::CalibrationInfo activeSweepCalibration_{};
   bool cancelled_ = false;
+  bool measurementQuiet_ = false;
   uint8_t configPhase_ = 0;
   uint8_t verifyPhase_ = 0;
   uint32_t startCode_ = 0;
@@ -155,6 +190,7 @@ class ImpedanceApp {
   uint32_t lastPollMs_ = 0;
   uint32_t measurementElapsedMs_ = 0;
   int16_t pendingReal_ = 0;
+  int16_t pendingImaginary_ = 0;
   const char* measurementError_ = nullptr;
   AD5934::Error driverError_;
   ImpedanceStatus publicStatus_{};

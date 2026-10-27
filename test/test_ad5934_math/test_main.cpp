@@ -24,7 +24,7 @@ void test_signed_dft_decoding(void) {
 
 void test_magnitude_uses_wide_arithmetic(void) {
   TEST_ASSERT_DOUBLE_WITHIN(0.000001, 5.0, AD5934Math::magnitude(3, 4));
-  TEST_ASSERT_DOUBLE_WITHIN(0.00001, 46340.950, AD5934Math::magnitude(-32768, -32768));
+  TEST_ASSERT_DOUBLE_WITHIN(0.00001, 46340.95001184158, AD5934Math::magnitude(-32768, -32768));
 }
 
 void test_sweep_increment_count_means_points_minus_one(void) {

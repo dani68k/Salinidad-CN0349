@@ -12,7 +12,7 @@ class Terminal {
   void printInfo();
   using ModuleHandler = bool (*)(void*, char*, bool, bool);
   using ModuleBusy = bool (*)(void*);
-  void attachModule(void* context, ModuleHandler handler, ModuleBusy busy, const char* help);
+  bool attachModule(void* context, ModuleHandler handler, ModuleBusy busy, const char* help);
 
  private:
   struct ScanResult {
@@ -51,7 +51,7 @@ class Terminal {
     ModuleBusy busy = nullptr;
     const char* help = nullptr;
   };
-  static constexpr size_t MAX_MODULES = 2;
+  static constexpr size_t MAX_MODULES = 3;
   Module modules_[MAX_MODULES] = {};
   size_t moduleCount_ = 0;
   bool moduleBusy() const;
