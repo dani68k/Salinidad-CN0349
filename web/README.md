@@ -10,6 +10,27 @@ tabla de referencias. La lectura y las órdenes siguen usando el protocolo BLE
 actual de CN0349; no se añade un gráfico espectral ni funciones de datos que
 este dispositivo no ofrece.
 
+Setup permite elegir si la conductividad EC se muestra en µS/cm, mS/cm o ambas
+unidades. Es una preferencia visual local a la página: se aplica inmediatamente
+y no modifica ni envía la configuración del instrumento. Por defecto se muestra
+en µS/cm.
+
+En Measurement, la temperatura se muestra como “Temperature with PT100” y la
+conductividad como “Conductivity with” seguida del modelo EC de la última
+medida (o de la configuración confirmada antes de recibir medidas). Cada
+tarjeta muestra únicamente su valor, con unidades en el propio valor cuando
+corresponde; el modelo no se repite junto al valor EC.
+
+Debajo de los medidores, Measurement dibuja el historial de los últimos 50
+ciclos recibidos. Temperatura y conductividad usan escalas verticales
+independientes; la escala EC usa mS/cm cuando se selecciona esa unidad y µS/cm
+para las otras opciones. Los ciclos cancelados no se añaden al historial y los
+valores fallidos dejan un hueco en la serie correspondiente.
+El selector AUTO/FIXED aparece debajo de la gráfica, alineado a la izquierda.
+AUTO ajusta los ejes a los valores recibidos; los límites de FIXED se configuran
+en Setup para temperatura (°C) y EC (µS/cm). Los límites EC se convierten al
+mostrar la gráfica en mS/cm.
+
 MEASUREMENT recibe el último ciclo por notificación. Al confirmar STOP, se
 vuelve a leer MEASUREMENT por BLE para mostrar el último ciclo disponible. Los
 snapshots CANCELLED de la parada no reemplazan los últimos datos mostrados; las
@@ -20,7 +41,7 @@ mantiene STOP habilitado por `busy=true`.
 El canal CONTROL usa paquetes de cuatro bytes y confirmación correlacionada por
 requestId. No se duplican parsers del Terminal ni cálculos. La página conserva
 file://, Web Bluetooth nativo, desconexión explícita y ausencia de reconexión
-automática, frameworks, servidor, Wi-Fi, almacenamiento y gráficas.
+automática, frameworks, servidor, Wi-Fi ni almacenamiento local.
 
 ## Hito 3B
 
@@ -43,4 +64,4 @@ UUID STATUS: `8d7b0002-6f7a-4f31-9c4d-2b6e6a7f3a10`.
 Web Bluetooth depende del navegador y del contexto seguro. Si `file://` no
 expone `navigator.bluetooth`, la página lo indica; para la prueba manual puede
 ser necesario servir `web/` mediante `localhost`. No hay dependencias externas,
-órdenes BLE, almacenamiento, gráficas ni reconexión automática.
+almacenamiento local ni reconexión automática.
