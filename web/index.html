@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>CN0349 | Measurement</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32x32.png">
+  <title>EC WATER ANALYSIS</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,10 +13,8 @@
   <header class="instrument-header">
     <div class="header-inner">
       <a class="brand" href="#/measurement" aria-label="CN0349 Measurement">
-        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-          <path d="M2 18h5l3-10 4 18 4-22 4 18 3-10 3 6h4" />
-        </svg>
-        <span><strong>CN0349</strong><small>WATER ANALYSIS</small></span>
+        <img class="brand-mark" src="images/favicon-32x32.png" alt="">
+        <span><strong>CN0349</strong><small>EC WATER ANALYSIS</small></span>
       </a>
       <div class="header-connection">
         <span class="header-device">CN0349</span>
@@ -60,17 +59,32 @@
 
           <div class="results-grid">
             <article class="result-card">
-              <p class="eyebrow">TEMPERATURE</p>
+              <p class="eyebrow">Temperature with PT100</p>
               <p id="pt-result" class="reading-value">—</p>
-              <span class="reading-unit">PT100 · °C</span>
             </article>
             <article class="result-card">
-              <p class="eyebrow">CONDUCTIVITY</p>
+              <p id="ec-title" class="eyebrow">Conductivity with RAW</p>
               <p id="ec-result" class="reading-value">—</p>
-              <span class="reading-unit">EC · µS/cm · mS/cm</span>
             </article>
           </div>
         </section>
+        <section class="card history-card" aria-labelledby="history-title">
+          <div class="card-heading">
+            <div><p class="eyebrow">LIVE DATA</p><h2 id="history-title">Measurement history</h2></div>
+            <span id="history-count" class="history-count">0 / 50 cycles</span>
+          </div>
+          <div id="measurement-chart" class="measurement-chart" role="img" aria-label="Measurement history chart; waiting for data"></div>
+          <div class="chart-legend" aria-hidden="true">
+            <span><i class="legend-temperature"></i>Temperature (°C)</span>
+            <span><i class="legend-conductivity"></i>Conductivity (<span id="chart-ec-unit">µS/cm</span>)</span>
+          </div>
+        </section>
+        <fieldset class="chart-scale-controls">
+          <legend>Y-axis scale</legend>
+          <label><input type="radio" name="chart-scale" value="auto" checked> AUTO</label>
+          <label><input type="radio" name="chart-scale" value="fixed"> FIXED</label>
+          <span id="chart-scale-error" role="status"></span>
+        </fieldset>
       </div>
 
       <div id="setup-view" class="page-view" hidden>
@@ -97,6 +111,28 @@
               <div class="button-row"><button id="cancel" type="button" class="button secondary">CANCEL</button><button id="apply" type="submit" class="button primary">APPLY CONFIGURATION</button></div>
             </div>
           </form>
+          <section class="display-settings" aria-label="Measurement display settings">
+            <div class="display-preference">
+              <p class="eyebrow">EC DISPLAY UNITS</p>
+              <label class="sr-only" for="ec-display">EC display units</label>
+              <select id="ec-display"><option value="us">µS/cm only</option><option value="ms">mS/cm only</option><option value="both">µS/cm and mS/cm</option></select>
+            </div>
+            <section class="fixed-axis-settings" aria-labelledby="fixed-axis-title">
+              <p id="fixed-axis-title" class="eyebrow">FIXED GRAPH SCALE</p>
+              <div class="axis-range-grid">
+                <fieldset class="axis-range">
+                  <legend>Temperature (°C)</legend>
+                  <label for="temperature-min">Minimum<input id="temperature-min" type="number" step="any" value="0"></label>
+                  <label for="temperature-max">Maximum<input id="temperature-max" type="number" step="any" value="50"></label>
+                </fieldset>
+                <fieldset class="axis-range">
+                  <legend>Conductivity (µS/cm)</legend>
+                  <label for="conductivity-min">Minimum<input id="conductivity-min" type="number" step="any" value="0"></label>
+                  <label for="conductivity-max">Maximum<input id="conductivity-max" type="number" step="any" value="1000"></label>
+                </fieldset>
+              </div>
+            </section>
+          </section>
         </section>
       </div>
 
@@ -121,7 +157,7 @@
       </div>
 
       <section class="message-area" aria-live="polite">
-        <p id="error">None</p>
+        <p id="error"></p>
       </section>
       <footer class="support-note"><span>CN0349 · WATER ANALYSIS</span><span>Web Bluetooth interface</span></footer>
     </main>
