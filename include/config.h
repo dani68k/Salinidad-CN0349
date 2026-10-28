@@ -6,7 +6,7 @@
 namespace Config {
 constexpr char FIRMWARE_NAME[] = "ATLANTES CN-0349";
 constexpr char FIRMWARE_VERSION[] = "1.0.0";
-constexpr char MILESTONE[] = "3A";
+constexpr char MILESTONE[] = "3B";
 constexpr uint32_t SERIAL_BAUD = 115200;
 constexpr int I2C_SDA_PIN = 4;
 constexpr int I2C_SCL_PIN = 5;

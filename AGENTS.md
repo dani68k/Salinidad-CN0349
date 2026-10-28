@@ -38,11 +38,15 @@
 
 ## Documentación
 
-- Actualizar `README.md` con una entrada **breve y cronológica** del microhito: fecha, objetivo, cambios, pruebas pendientes/realizadas y estado.
-- Mantener un documento Markdown global que explique cómo cooperan firmware y WebApp BLE; actualizar solo las secciones afectadas.
-- Crear o actualizar un `.md` explicativo **en cada carpeta de código fuente o módulo modificado**, describiendo propósito, arquitectura, interfaces, comportamiento y limitaciones relevantes.
-- Reutilizar la documentación existente; no duplicar grandes explicaciones ni reescribir documentos completos.
-- Distinguir explícitamente pruebas pendientes de pruebas ejecutadas.
+- Mantener un `README.md` en cada módulo o carpeta de desarrollo que requiera documentación técnica.
+- Al modificar un módulo, actualizar únicamente su `README.md` con las nuevas funciones, interfaces o cambios de comportamiento implementados.
+- Documentar de forma breve y técnica: propósito de las funciones, parámetros, valores devueltos y limitaciones relevantes.
+- Respetar la documentación existente y evitar duplicaciones o reescrituras completas.
+- No crear ni mantener diarios cronológicos de desarrollo.
+- No actualizar automáticamente el `README.md` principal ni documentos globales de arquitectura.
+- No crear documentación adicional salvo petición explícita.
+- No documentar funcionalidades previstas que todavía no estén implementadas.
+- Al finalizar, indicar brevemente los archivos modificados y las pruebas manuales pendientes, sin generar informes adicionales.
 
 ## Flujo de trabajo
 

@@ -1,48 +1,131 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CN0349 BLE</title>
+  <meta name="color-scheme" content="dark">
+  <title>CN0349 | Measurement</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main>
-    <header>    
-      <h1>CN0349 BLE</h1>
-    </header>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="instrument-header">
+    <div class="header-inner">
+      <a class="brand" href="#/measurement" aria-label="CN0349 Measurement">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M2 18h5l3-10 4 18 4-22 4 18 3-10 3 6h4" />
+        </svg>
+        <span><strong>CN0349</strong><small>WATER ANALYSIS</small></span>
+      </a>
+      <div class="header-connection">
+        <span class="header-device">CN0349</span>
+        <span id="connection" class="status-badge connection-badge" data-state="muted" role="status">DISCONNECTED</span>
+        <button id="connect" class="button secondary">CONNECT</button>
+        <button id="disconnect" class="button secondary" hidden>DISCONNECT</button>
+      </div>
+    </div>
+  </header>
 
-    <p id="compatibility" class="notice" hidden></p>
+  <div class="app-layout">
+    <aside class="sidebar">
+      <nav class="main-nav" aria-label="Main navigation">
+        <a id="nav-measurement" href="#/measurement" aria-current="page">Measurement</a>
+        <a id="nav-setup" href="#/setup" aria-current="false">Setup</a>
+        <a id="nav-calibration" href="#/calibration" aria-current="false">Calibration</a>
+      </nav>
+    </aside>
 
-    <section class="panel controls" aria-label="Conexión BLE">
-      <button id="connect">Connect</button>
-      <button id="disconnect" class="secondary" disabled>Disconnect</button>
-    </section>
+    <main id="main-content" class="instrument-main" tabindex="-1">
+      <p id="compatibility" class="notice" hidden></p>
 
-    <section class="grid">
-      <article class="panel">
-        <h2>Conexión BLE</h2>
-        <p id="connection" class="value" data-state="off">Desconectado</p>
-      </article>
-      <article class="panel">
-        <h2>Instrumento</h2>
-        <p id="instrument" class="value">Sin datos</p>
-      </article>
-      <article class="panel metric">
-        <h2>Calibraciones</h2>
-        <p id="cal" class="value">—</p>
-      </article>
-      <article class="panel metric">
-        <h2>Ocupado</h2>
-        <p id="busy" class="value">—</p>
-      </article>
-    </section>
+      <div id="measurement-view" class="page-view">
+        <section class="card measurement-card" aria-labelledby="measurement-title">
+          <div class="card-heading measurement-heading">
+            <div class="measurement-state">
+              <p class="eyebrow">MEASUREMENT</p>
+              <h1 id="measurement-title">Latest readings</h1>
+              <p id="cycle" class="cycle-summary">Waiting for data...</p>
+            </div>
+            <div class="instrument-status" aria-label="Instrument status">
+              <span><i id="connection-dot" class="status-dot" data-state="off"></i><strong id="instrument">DISCONNECTED</strong></span>
+              <span>CAL <strong id="cal">—</strong></span>
+              <span>BUSY <strong id="busy">—</strong></span>
+            </div>
+            <div class="measurement-actions">
+              <button id="once" class="button secondary">ONCE</button>
+              <button id="start" class="button primary">START</button>
+              <button id="stop" class="button secondary">STOP</button>
+            </div>
+          </div>
 
-    <section class="panel error-panel">
-      <h2>Errores</h2>
-      <p id="error">Ninguno</p>
-    </section>
-  </main>
+          <div class="results-grid">
+            <article class="result-card">
+              <p class="eyebrow">TEMPERATURE</p>
+              <p id="pt-result" class="reading-value">—</p>
+              <span class="reading-unit">PT100 · °C</span>
+            </article>
+            <article class="result-card">
+              <p class="eyebrow">CONDUCTIVITY</p>
+              <p id="ec-result" class="reading-value">—</p>
+              <span class="reading-unit">EC · µS/cm · mS/cm</span>
+            </article>
+          </div>
+        </section>
+      </div>
+
+      <div id="setup-view" class="page-view" hidden>
+        <div class="page-heading">
+          <div><p class="eyebrow">SETUP</p><h1>Sensor configuration</h1></div>
+          <p class="page-caption">Device settings and confirmed values</p>
+        </div>
+        <section class="card setup-card" aria-labelledby="setup-title">
+          <div class="card-heading">
+            <div><p class="eyebrow">REQUESTED CONFIGURATION</p><h2 id="setup-title">Measurement setup</h2></div>
+            <span id="pending" class="status-badge" data-state="muted">NO CHANGES</span>
+          </div>
+          <form id="setup-form">
+            <div class="setup-grid">
+              <label for="interval">Sample period<div class="input-with-unit"><input id="interval" type="number" min="1" max="2147483647" step="1" required><span class="input-unit">ms</span></div></label>
+              <label for="range">EC range<select id="range"><option value="0">LOW</option><option value="1">HIGH</option></select></label>
+              <label for="model">EC model<select id="model"><option value="0">RAW</option><option value="1">SERIES</option><option value="2">AD</option></select></label>
+              <label for="cell-k">Cell constant<div class="input-with-unit"><input id="cell-k" type="number" min="0.000001" step="any" required><span class="input-unit">cm⁻¹</span></div></label>
+              <label for="sensors">Sensors<select id="sensors"><option value="1">PT100</option><option value="2">EC</option><option value="3">PT100 + EC</option></select></label>
+              <div class="sensor-action"><span class="field-label">Active sensors</span><button id="set-sensors" type="button" class="button secondary">SET SENSORS</button></div>
+            </div>
+            <div class="setup-footer">
+              <p class="hint">Changes are applied after device confirmation.</p>
+              <div class="button-row"><button id="cancel" type="button" class="button secondary">CANCEL</button><button id="apply" type="submit" class="button primary">APPLY CONFIGURATION</button></div>
+            </div>
+          </form>
+        </section>
+      </div>
+
+      <div id="calibration-view" class="page-view" hidden>
+        <div class="page-heading">
+          <div><p class="eyebrow">CALIBRATION</p><h1>Sensor calibration</h1></div>
+          <p class="page-caption">Reference status and measurement factors</p>
+        </div>
+        <section class="card calibration-card" aria-labelledby="calibration-title">
+          <div class="card-heading">
+            <div><p class="eyebrow">CALIBRATION DATA</p><h2 id="calibration-title">References</h2></div>
+            <button id="cal-run" class="button primary">CAL RUN</button>
+          </div>
+          <p id="cal-general" class="summary">No data</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Reference</th><th>Status</th><th>DFT magnitude</th><th>GF</th><th>NOS</th></tr></thead>
+              <tbody id="calibration-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="message-area" aria-live="polite">
+        <p id="error">None</p>
+      </section>
+      <footer class="support-note"><span>CN0349 · WATER ANALYSIS</span><span>Web Bluetooth interface</span></footer>
+    </main>
+  </div>
   <script src="app.js"></script>
 </body>
 </html>

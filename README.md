@@ -1,5 +1,15 @@
 # ATLANTES CN-0349
 
+## 2026-10-28 — Hito 3B: Setup mediante BLE
+
+Se amplía el servicio ATLANTES con lectura/notificación de SETUP, escritura
+binaria compacta de la configuración completa y confirmación correlacionada.
+Sensores, intervalo, rango EC, K y modelo se aplican atómicamente mediante
+`CN0349Manager::setSetup()` solo en READY. La WebApp añade edición local,
+APPLY/CANCEL, cambios pendientes, validación y sincronización con cambios del
+terminal. No se añaden dependencias. Compilación, tests y validación BLE quedan
+pendientes de ejecución manual por instrucción del hito.
+
 ## 2026-10-28 — Hito 3A: BLE GATT y WebApp de pruebas
 
 Objetivo: exponer el estado real del instrumento por BLE y comprobarlo desde

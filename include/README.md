@@ -1,5 +1,10 @@
 # Hito 2F — configuración vigente (2026-10-27)
 
+## Hito 3B
+
+`MILESTONE` identifica ahora `3B`. El protocolo Setup permanece encapsulado en
+`src/ble`; no añade parámetros BLE a `Config` ni cambia valores metrológicos.
+
 ## Hito 3A
 
 `MILESTONE` identifica ahora `3A`. Los UUID y el nombre GAP se mantienen en

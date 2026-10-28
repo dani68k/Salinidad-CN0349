@@ -1,5 +1,20 @@
 # ATLANTES — arquitectura firmware y futura Web BLE
 
+## Hito 3B: Setup transaccional por BLE
+
+BLE expone SETUP (estado aplicado), SETUP_COMMAND (petición completa) y
+SETUP_RESULT (confirmación/error). El callback GATT solo encola bytes; el loop
+comprueba READY y aplica un `InstrumentSetup` completo mediante la misma
+`setSetup()` usada por Terminal. La validación funcional sigue centralizada en
+Manager y un error conserva íntegramente el setup anterior.
+
+El protocolo binario fijo de 12/13/3 bytes cabe sin elevar MTU. Un requestId
+correlaciona escritura y resultado. `BleApp::update()` compara el snapshot del
+Manager y notifica SETUP ante cambios BLE o Terminal. La WebApp conserva un
+borrador local, solo lo envía con APPLY y confirma mediante RESULT + lectura;
+CANCEL restaura el último snapshot confirmado. Fuera de READY los controles y
+el firmware rechazan cambios. Calibration y Measurement BLE siguen fuera de 3B.
+
 ## Hito 3A: BLE GATT y WebApp
 
 `main` conserva un único `CN0349Manager` compartido por Terminal y `BleApp`.

@@ -1,106 +1,62 @@
-const DEVICE_NAME = 'CN0349';
-const SERVICE_UUID = '8d7b0001-6f7a-4f31-9c4d-2b6e6a7f3a10';
-const STATUS_UUID = '8d7b0002-6f7a-4f31-9c4d-2b6e6a7f3a10';
-
-const ui = {
-  compatibility: document.querySelector('#compatibility'),
-  connect: document.querySelector('#connect'),
-  disconnect: document.querySelector('#disconnect'),
-  connection: document.querySelector('#connection'),
-  instrument: document.querySelector('#instrument'),
-  cal: document.querySelector('#cal'),
-  busy: document.querySelector('#busy'),
-  error: document.querySelector('#error')
+const UUID = {
+  service: '8d7b0001-6f7a-4f31-9c4d-2b6e6a7f3a10', status: '8d7b0002-6f7a-4f31-9c4d-2b6e6a7f3a10',
+  setup: '8d7b0003-6f7a-4f31-9c4d-2b6e6a7f3a10', setupCommand: '8d7b0004-6f7a-4f31-9c4d-2b6e6a7f3a10',
+  setupResult: '8d7b0005-6f7a-4f31-9c4d-2b6e6a7f3a10', calibration: '8d7b0006-6f7a-4f31-9c4d-2b6e6a7f3a10',
+  measurement: '8d7b0007-6f7a-4f31-9c4d-2b6e6a7f3a10', controlCommand: '8d7b0008-6f7a-4f31-9c4d-2b6e6a7f3a10',
+  controlResult: '8d7b0009-6f7a-4f31-9c4d-2b6e6a7f3a10'
 };
+const VERSION = 1, decoder = new TextDecoder(), $ = selector => document.querySelector(selector);
+const ui = { compatibility: $('#compatibility'), connect: $('#connect'), disconnect: $('#disconnect'), connection: $('#connection'), connectionDot: $('#connection-dot'),
+  instrument: $('#instrument'), cal: $('#cal'), busy: $('#busy'), error: $('#error'), form: $('#setup-form'), interval: $('#interval'),
+  range: $('#range'), model: $('#model'), cellK: $('#cell-k'), apply: $('#apply'), cancel: $('#cancel'), pending: $('#pending'),
+  calRun: $('#cal-run'), calGeneral: $('#cal-general'), calBody: $('#calibration-body'), sensors: $('#sensors'),
+  setSensors: $('#set-sensors'), once: $('#once'), start: $('#start'), stop: $('#stop'), cycle: $('#cycle'),
+  ptResult: $('#pt-result'), ecResult: $('#ec-result') };
+let device, ch = {}, appliedSetup = null, state = null, busy = false, applying = false, requestId = 0;
+let pendingSetup = null, pendingControl = null, previousState = null;
+const controlErrors = ['OK','INVALID_LENGTH','UNSUPPORTED_VERSION','INVALID_OPERATION','NOT_READY','BUSY','INVALID_ARGUMENT','HARDWARE','NOT_CALIBRATED','TIMEOUT','MEASUREMENT_FAILED','CANCELLED','INTERNAL_ERROR'];
+const instrumentErrors = ['OK','BUSY','INVALID_ARGUMENT','HARDWARE','NOT_CALIBRATED','TIMEOUT','MEASUREMENT_FAILED','CANCELLED'];
+const conductivityErrors = ['OK','NOT_RUN','INVALID_MODEL','INVALID_IMPEDANCE','INVALID_K','INVALID_R2','NON_POSITIVE_RESISTANCE','OVERFLOW','CAL_INVALID','CAL_MISMATCH','INVALID_MAGNITUDE','NON_POSITIVE_ADMITTANCE','INVALID_DENOMINATOR'];
 
-let device = null;
-let statusCharacteristic = null;
-const decoder = new TextDecoder('utf-8');
-
-function setConnection(text, connected) {
-  ui.connection.textContent = text;
-  ui.connection.dataset.state = connected ? 'on' : 'off';
-  ui.connect.disabled = connected;
-  ui.disconnect.disabled = !connected;
+function error(value) { ui.error.textContent = value ? (value.message || String(value)) : 'None'; }
+function connected() { return Boolean(device?.gatt?.connected); }
+function ready() { return connected() && state === 'READY' && !busy && !applying && !pendingControl; }
+function setConnection(text, active) { ui.connection.textContent = active ? 'CONNECTED' : text; ui.connection.dataset.state = active ? 'on' : 'off'; ui.connectionDot.dataset.state = active ? 'on' : 'off'; ui.connect.disabled = active; ui.connect.hidden = active; ui.disconnect.disabled = !active; ui.disconnect.hidden = !active; }
+function setupDraft() { return { sensors: appliedSetup?.sensors || 3, interval: Number(ui.interval.value), range: Number(ui.range.value), model: Number(ui.model.value), cellK: Number(ui.cellK.value) }; }
+function sameSetup(a,b) { return a && b && a.interval===b.interval && a.range===b.range && a.model===b.model && Math.abs(a.cellK-b.cellK)<=Math.max(1e-6,Math.abs(a.cellK)*1e-6); }
+function availability() {
+  const canEdit = ready(); for (const item of ui.form.elements) item.disabled = !canEdit;
+  ui.apply.disabled = !canEdit || !appliedSetup || sameSetup(setupDraft(), appliedSetup); ui.calRun.disabled = !canEdit;
+  ui.sensors.disabled = !canEdit; ui.setSensors.disabled = !canEdit || !appliedSetup || Number(ui.sensors.value)===appliedSetup.sensors;
+  ui.once.disabled = !canEdit; ui.start.disabled = !canEdit; ui.stop.disabled = !connected() || !busy || Boolean(pendingControl);
 }
+function pendingLabel() { const changed=appliedSetup&&!sameSetup(setupDraft(),appliedSetup); ui.pending.textContent=changed?'CHANGES PENDING':'NO CHANGES'; ui.pending.classList.toggle('changed',Boolean(changed)); availability(); }
 
-function showError(error) {
-  ui.error.textContent = error ? (error.message || String(error)) : 'Ninguno';
-}
+function decodeSetup(value) { const v=new DataView(value.buffer,value.byteOffset,value.byteLength); if(value.byteLength!==12||v.getUint8(0)!==VERSION) throw Error('SETUP no válido'); return {sensors:v.getUint8(1),interval:v.getUint32(2,true),range:v.getUint8(6),model:v.getUint8(7),cellK:v.getFloat32(8,true)}; }
+function renderSetup(s) { appliedSetup=s; ui.interval.value=s.interval; ui.range.value=s.range; ui.model.value=s.model; ui.cellK.value=s.cellK; ui.sensors.value=s.sensors; pendingLabel(); }
+function encodeSetup(s,id) { if(!Number.isInteger(s.interval)||s.interval<1||s.interval>2147483647||!Number.isFinite(s.cellK)||s.cellK<=0) throw Error('Setup no válido'); const b=new ArrayBuffer(13),v=new DataView(b); v.setUint8(0,VERSION);v.setUint8(1,id);v.setUint8(2,s.sensors);v.setUint32(3,s.interval,true);v.setUint8(7,s.range);v.setUint8(8,s.model);v.setFloat32(9,s.cellK,true);return b; }
+function wait(kind,id,op=0) { return new Promise((resolve,reject)=>{ const holder={id,op,resolve,reject,timer:setTimeout(()=>{ if(kind==='setup')pendingSetup=null;else pendingControl=null; reject(Error('Timeout de confirmación BLE'));},5000)}; if(kind==='setup')pendingSetup=holder;else pendingControl=holder; }); }
+function finishPending(holder,code,names) { clearTimeout(holder.timer); code===0?holder.resolve():holder.reject(Error(names[code]||`ERROR_${code}`)); }
 
-function showStatus(value) {
-  try {
-    const status = JSON.parse(decoder.decode(value));
-    if (typeof status.state !== 'string' || typeof status.cal !== 'number' || typeof status.busy !== 'boolean') {
-      throw new Error('STATUS contiene campos no válidos');
-    }
-    ui.instrument.textContent = status.state;
-    ui.cal.textContent = `${status.cal}/4`;
-    ui.busy.textContent = status.busy ? 'Sí' : 'No';
-    showError(null);
-  } catch (error) {
-    showError(error);
-  }
-}
+async function applySetup(event) { event.preventDefault(); if(!ready())return; applying=true;availability();error(null); try{const id=requestId=++requestId&255, packet=encodeSetup(setupDraft(),id),ack=wait('setup',id);await ch.setupCommand.writeValueWithResponse(packet);await ack;renderSetup(decodeSetup(await ch.setup.readValue()));}catch(e){if(pendingSetup){clearTimeout(pendingSetup.timer);pendingSetup=null;}error(e);}finally{applying=false;availability();} }
+async function control(op,arg=0) { if(pendingControl)throw Error('Hay otra orden pendiente'); const id=requestId=++requestId&255,b=Uint8Array.of(VERSION,id,op,arg),ack=wait('control',id,op); availability(); try{await ch.controlCommand.writeValueWithResponse(b);await ack;}catch(e){if(pendingControl){clearTimeout(pendingControl.timer);pendingControl=null;}throw e;}finally{availability();} }
 
-function onStatus(event) {
-  showStatus(event.target.value);
-}
+function showStatus(value) { try{const s=JSON.parse(decoder.decode(value));previousState=state;state=s.state;busy=s.busy;ui.instrument.textContent=state;ui.cal.textContent=`${s.cal}/4`;ui.busy.textContent=busy?'Yes':'No';availability();if(previousState==='CALIBRATING'&&state!=='CALIBRATING')readCalibration();}catch(e){error(e);} }
+function setupResult(event){const v=event.target.value;if(!pendingSetup||v.byteLength!==3||v.getUint8(1)!==pendingSetup.id)return;const p=pendingSetup;pendingSetup=null;finishPending(p,v.getUint8(2),['OK','INVALID_LENGTH','UNSUPPORTED_VERSION','INVALID_VALUE','NOT_READY','BUSY','INTERNAL_ERROR']);}
+function controlResult(event){const v=event.target.value;if(!pendingControl||v.byteLength!==4||v.getUint8(1)!==pendingControl.id||v.getUint8(2)!==pendingControl.op)return;const p=pendingControl;pendingControl=null;finishPending(p,v.getUint8(3),controlErrors);}
 
-function resetStatus() {
-  statusCharacteristic = null;
-  ui.instrument.textContent = 'Sin datos';
-  ui.cal.textContent = '—';
-  ui.busy.textContent = '—';
-}
+function decodeCalibration(value){if(value.byteLength!==76)throw Error('CALIBRATION incompleta');const v=new DataView(value.buffer,value.byteOffset,value.byteLength);if(v.getUint8(0)!==VERSION)throw Error('Versión CALIBRATION no compatible');const refs=[],names=['HIGH 100R','HIGH 1K','LOW 1K','LOW 10K'];let o=6;for(const name of names){refs.push({name,state:v.getUint8(o),mag:v.getFloat32(o+1,true),gf:v.getFloat32(o+5,true)});o+=9;}for(const name of ['AD HIGH','AD LOW']){refs.push({name,state:v.getUint8(o)?2:0,gf:v.getFloat64(o+1,true),nos:v.getFloat64(o+9,true),ad:true});o+=17;}return{state:v.getUint8(1),run:v.getUint32(2,true),refs};}
+function renderCalibration(c){const general=['ABSENT','CALIBRATING','VALID','PARTIAL','INVALID'][c.state]||'UNKNOWN';ui.calGeneral.textContent=`${general} · RUN ${c.run}`;ui.calBody.innerHTML=c.refs.map(r=>`<tr><td>${r.name}</td><td>${['INVALID','RUNNING','VALID'][r.state]||'—'}</td><td>${r.ad?'—':r.mag.toFixed(3)}</td><td>${r.gf?r.gf.toExponential(8):'—'}</td><td>${r.ad&&r.state===2?r.nos.toFixed(3):'—'}</td></tr>`).join('');}
+async function readCalibration(){if(!ch.calibration)return;try{renderCalibration(decodeCalibration(await ch.calibration.readValue()));}catch(e){error(e);}}
 
-function onDisconnected() {
-  setConnection('Desconectado', false);
-  resetStatus();
-}
+function showMeasurement(value){try{if(value.byteLength!==26)return;const v=new DataView(value.buffer,value.byteOffset,value.byteLength);if(v.getUint8(0)!==VERSION)return;const cycle=v.getUint32(2,true);if(!cycle)return;const overall=v.getUint8(6);if(overall===2)return;const overallError=v.getUint8(7);ui.cycle.textContent=`Cycle ${cycle} · ${overall===1?'OK':instrumentErrors[overallError]||'ERROR'}`;const ptState=v.getUint8(8),ptError=v.getUint8(9);ui.ptResult.textContent=ptState===0?'Not selected':ptState===1?`${v.getFloat32(10,true).toFixed(2)} °C`:instrumentErrors[ptError]||'ERROR';const ecState=v.getUint8(14),ecError=v.getUint8(15),ecDetail=v.getUint8(17),models=['RAW','SERIES','AD'];const ecFailure=ecError===6&&ecDetail>1?(conductivityErrors[ecDetail]||'MEASUREMENT_FAILED'):(instrumentErrors[ecError]||'ERROR');ui.ecResult.textContent=ecState===0?'Not selected':ecState===1?`${v.getFloat32(18,true).toFixed(1)} µS/cm · ${v.getFloat32(22,true).toFixed(3)} mS/cm · ${models[v.getUint8(16)]||'?'}`:ecFailure;}catch(e){error(e);}}
 
-async function connect() {
-  showError(null);
-  setConnection('Seleccionando dispositivo…', false);
-  ui.connect.disabled = true;
-  try {
-    device = await navigator.bluetooth.requestDevice({
-      filters: [{ name: DEVICE_NAME }],
-      optionalServices: [SERVICE_UUID]
-    });
-    device.addEventListener('gattserverdisconnected', onDisconnected);
-    setConnection('Conectando…', false);
-    ui.connect.disabled = true;
-    const server = await device.gatt.connect();
-    const service = await server.getPrimaryService(SERVICE_UUID);
-    statusCharacteristic = await service.getCharacteristic(STATUS_UUID);
-    showStatus(await statusCharacteristic.readValue());
-    await statusCharacteristic.startNotifications();
-    statusCharacteristic.addEventListener('characteristicvaluechanged', onStatus);
-    setConnection(`Conectado a ${device.name || DEVICE_NAME}`, true);
-  } catch (error) {
-    showError(error);
-    if (device?.gatt?.connected) device.gatt.disconnect();
-    setConnection('Desconectado', false);
-  }
-}
+async function connect(){error(null);setConnection('CONNECTING…',false);ui.connect.disabled=true;try{device=await navigator.bluetooth.requestDevice({filters:[{name:'CN0349'}],optionalServices:[UUID.service]});device.addEventListener('gattserverdisconnected',disconnectEvent);const server=await device.gatt.connect(),service=await server.getPrimaryService(UUID.service);for(const [key,id] of Object.entries(UUID))if(key!=='service')ch[key]=await service.getCharacteristic(id);showStatus(await ch.status.readValue());renderSetup(decodeSetup(await ch.setup.readValue()));await readCalibration();showMeasurement(await ch.measurement.readValue());for(const [key,handler] of [['status',e=>showStatus(e.target.value)],['setup',e=>{try{renderSetup(decodeSetup(e.target.value));}catch(problem){error(problem);}}],['setupResult',setupResult],['measurement',e=>showMeasurement(e.target.value)],['controlResult',controlResult]]){await ch[key].startNotifications();ch[key].addEventListener('characteristicvaluechanged',handler);}setConnection('CONNECTED',true);availability();}catch(e){error(e);if(device?.gatt?.connected)device.gatt.disconnect();setConnection('DISCONNECTED',false);}}
+function disconnectEvent(){setConnection('DISCONNECTED',false);ch={};state=null;busy=false;appliedSetup=null;if(pendingSetup){clearTimeout(pendingSetup.timer);pendingSetup.reject(Error('BLE disconnected'));pendingSetup=null;}if(pendingControl){clearTimeout(pendingControl.timer);pendingControl.reject(Error('BLE disconnected'));pendingControl=null;}availability();}
 
-function disconnect() {
-  showError(null);
-  if (device?.gatt?.connected) device.gatt.disconnect();
-  else onDisconnected();
-}
-
-if (!navigator.bluetooth) {
-  ui.compatibility.hidden = false;
-  ui.compatibility.textContent = location.protocol === 'file:'
-    ? 'Web Bluetooth no está disponible desde file:// en este navegador. Prueba un navegador compatible o sirve esta carpeta mediante localhost.'
-    : 'Este navegador no ofrece Web Bluetooth. Usa un navegador compatible con Bluetooth habilitado.';
-  ui.connect.disabled = true;
-} else if (!window.isSecureContext) {
-  ui.compatibility.hidden = false;
-  ui.compatibility.textContent = 'Web Bluetooth requiere un contexto seguro. Si file:// está bloqueado, abre la página desde localhost.';
-}
-
-ui.connect.addEventListener('click', connect);
-ui.disconnect.addEventListener('click', disconnect);
+ui.connect.onclick=connect;ui.disconnect.onclick=()=>device?.gatt?.disconnect();ui.form.oninput=pendingLabel;ui.form.onsubmit=applySetup;ui.cancel.onclick=()=>appliedSetup&&renderSetup(appliedSetup);
+const views=['measurement','setup','calibration'];function showView(name,updateHash=false){const active=views.includes(name)?name:'measurement';for(const view of views){$(`#${view}-view`).hidden=view!==active;$(`#nav-${view}`).setAttribute('aria-current',view===active?'page':'false');}document.title=`CN0349 | ${active[0].toUpperCase()}${active.slice(1)}`;if(updateHash)location.hash=`#/${active}`;}for(const view of views)$(`#nav-${view}`).onclick=event=>{event.preventDefault();showView(view,true);};window.addEventListener('hashchange',()=>{if(location.hash.startsWith('#/'))showView(location.hash.slice(2));});showView(location.hash.slice(2));
+ui.calRun.onclick=async()=>{error(null);try{await control(1); }catch(e){error(e);}};
+ui.setSensors.onclick=async()=>{error(null);try{await control(2,Number(ui.sensors.value));renderSetup(decodeSetup(await ch.setup.readValue()));}catch(e){error(e);}};
+ui.once.onclick=async()=>{error(null);try{await control(3);}catch(e){error(e);}};ui.start.onclick=async()=>{error(null);try{await control(4);}catch(e){error(e);}};ui.stop.onclick=async()=>{error(null);try{await control(5);showMeasurement(await ch.measurement.readValue());}catch(e){error(e);}};
+if(!navigator.bluetooth){ui.compatibility.hidden=false;ui.compatibility.textContent=location.protocol==='file:'?'Web Bluetooth no está disponible desde file:// en este navegador; usa uno compatible o localhost.':'Este navegador no ofrece Web Bluetooth.';ui.connect.disabled=true;}else if(!window.isSecureContext){ui.compatibility.hidden=false;ui.compatibility.textContent='Web Bluetooth requiere contexto seguro; prueba localhost.';}availability();
