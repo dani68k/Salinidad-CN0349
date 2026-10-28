@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CN0349 BLE</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <header>    
+      <h1>CN0349 BLE</h1>
+    </header>
+
+    <p id="compatibility" class="notice" hidden></p>
+
+    <section class="panel controls" aria-label="Conexión BLE">
+      <button id="connect">Connect</button>
+      <button id="disconnect" class="secondary" disabled>Disconnect</button>
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <h2>Conexión BLE</h2>
+        <p id="connection" class="value" data-state="off">Desconectado</p>
+      </article>
+      <article class="panel">
+        <h2>Instrumento</h2>
+        <p id="instrument" class="value">Sin datos</p>
+      </article>
+      <article class="panel metric">
+        <h2>Calibraciones</h2>
+        <p id="cal" class="value">—</p>
+      </article>
+      <article class="panel metric">
+        <h2>Ocupado</h2>
+        <p id="busy" class="value">—</p>
+      </article>
+    </section>
+
+    <section class="panel error-panel">
+      <h2>Errores</h2>
+      <p id="error">Ninguno</p>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

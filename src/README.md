@@ -1,5 +1,13 @@
 # Firmware — Hito 2F (2026-10-27)
 
+## Hito 3A — integración BLE
+
+`main.cpp` añade una instancia `BleApp` que comparte `CN0349Manager` con
+Terminal. `setup()` inicializa BLE después del instrumento y `loop()` llama
+`ble.update()` sin bloqueos. El módulo solo publica status; no consume ciclos,
+no modifica setup/calibración/medición y no altera Serial. Dependencias:
+NimBLE-Arduino y `src/ble/`. Limitaciones y UUID se documentan allí.
+
 Propósito: instrumento cooperativo Pt100/EC, preparado para reutilización BLE.
 `main.cpp` crea un solo driver AD5934, ADG715, MuxApp, ImpedanceApp,
 CN0349Manager y Terminal. Inicializa Wire y Serial, sin esperar conexión del

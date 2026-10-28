@@ -1,5 +1,11 @@
 # Hito 2F — configuración vigente (2026-10-27)
 
+## Hito 3A
+
+`MILESTONE` identifica ahora `3A`. Los UUID y el nombre GAP se mantienen en
+`src/ble/BleApp.h`, junto al módulo que los usa; no se añaden parámetros BLE a
+la configuración metrológica compartida.
+
 ## Hito 2G
 
 `MILESTONE` pasa a `2G`. K=1 cm⁻¹ y R2=100 Ω siguen siendo nominales. Las

@@ -1,5 +1,20 @@
 # ATLANTES CN-0349
 
+## 2026-10-28 — Hito 3A: BLE GATT y WebApp de pruebas
+
+Objetivo: exponer el estado real del instrumento por BLE y comprobarlo desde
+una WebApp local mínima. Se añade el periférico `CN0349`, servicio ATLANTES y
+característica STATUS READ+NOTIFY. El JSON contiene `state`, número de
+calibraciones legacy válidas en `cal` y `busy`; se actualiza desde la API del
+Manager sin duplicar lógica ni consumir medidas. Advertising se reanuda tras
+desconexión y Terminal permanece activo.
+
+La carpeta `web/` permite conectar/desconectar, leer STATUS, recibir cambios y
+mostrar desconexiones/errores. No incluye órdenes, reconexión automática,
+Wi-Fi, almacenamiento ni gráficas. Se añade NimBLE-Arduino `^2.5.1`. Por
+instrucción del hito y `AGENTS.md`, compilación y pruebas quedan pendientes de
+ejecución manual; el código no se declara validado en placa.
+
 ## 2026-10-28 — Hito 2G: método EC ANALOG_DEVICES
 
 Se incorpora CN-0349 Rev. A sin modificar RAW, SERIES ni Pt100. Las cuatro

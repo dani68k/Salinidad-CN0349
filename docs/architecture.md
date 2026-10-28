@@ -1,5 +1,34 @@
 # ATLANTES — arquitectura firmware y futura Web BLE
 
+## Hito 3A: BLE GATT y WebApp
+
+`main` conserva un único `CN0349Manager` compartido por Terminal y `BleApp`.
+Después de `instrument.update()` se atienden ambas interfaces de forma
+cooperativa. BLE solo consulta `getStatus()`/`isBusy()`; no consume el slot de
+resultados, no inicia operaciones y no toca I²C. NimBLE gestiona GATT y GAP;
+el firmware no crea tareas FreeRTOS propias ni introduce esperas.
+
+```text
+Terminal ─┐
+          ├── CN0349Manager ── adquisición y conversiones existentes
+BleApp  ──┘         │
+                    └── STATUS READ + NOTIFY ── WebApp local
+```
+
+Nombre GAP: `CN0349`. Servicio ATLANTES:
+`8d7b0001-6f7a-4f31-9c4d-2b6e6a7f3a10`. STATUS:
+`8d7b0002-6f7a-4f31-9c4d-2b6e6a7f3a10`. Payload UTF-8 compacto:
+`{"state":"READY","cal":4,"busy":false}`. `cal` es 0–4 y cuenta
+calibraciones legacy válidas. El mapeo es NotInitialized→INIT,
+Calibrating→CALIBRATING, Idle listo→READY, Measuring/Stopping→MEASURING y
+Error/no readiness→ERROR. Se notifica al cambiar el payload y se reanuda
+advertising tras desconexión.
+
+La WebApp nativa lee y se suscribe a STATUS. `file://` puede no disponer de Web
+Bluetooth según navegador; la UI lo detecta y recomienda localhost. Hito 3A no
+define escrituras, Setup/Calibration/Measurement BLE, seguridad, bonding,
+reconexión automática, persistencia, Wi-Fi ni servidor HTTP.
+
 ## Hito 2G: procesamiento EC y contrato BLE futuro
 
 La adquisición DFT sigue siendo única. RAW usa impedancia legacy; SERIES resta
