@@ -6,6 +6,9 @@ class TwoWire {
   uint8_t regs[256]{};
   uint8_t mask=0x12, address=0, pointer=0;
   bool muxMismatch=false, dftTimeout=false, standbyFailure=false;
+  bool adAbsent=false, muxAbsent=false, busError=false;
+  uint8_t zeroDftMask=0xff, timeoutMask=0xff;
+  std::vector<uint8_t> routes;
   unsigned transactions=0;
   std::vector<uint8_t> tx, rx;
   TwoWire() { regs[0x80]=0xB1; regs[0x81]=8; regs[0x8F]=6; setDft(600,800); }
@@ -15,9 +18,10 @@ class TwoWire {
   size_t write(const uint8_t* b,size_t n) { tx.insert(tx.end(),b,b+n); return n; }
   uint8_t endTransmission(bool=true) {
     ++transactions;
+    if (busError || (address==0x0D && adAbsent) || (address==0x48 && muxAbsent)) return 2;
     if(address!=0x0D && address!=0x48) return 2;
     if(tx.empty()) return 0;
-    if(address==0x48) { if(!muxMismatch) mask=tx[0]; return 0; }
+    if(address==0x48) { if(!muxMismatch) { mask=tx[0]; routes.push_back(mask); } return 0; }
     if(tx[0]==0xB0) { pointer=tx.at(1); return 0; }
     if(standbyFailure && tx[0]==0x80 && (tx.at(1)&0xF0)==0xB0) return 2;
     for(size_t i=1;i<tx.size();++i) regs[uint8_t(tx[0]+i-1)]=tx[i];
@@ -26,7 +30,16 @@ class TwoWire {
   size_t requestFrom(uint8_t a,size_t n,bool) {
     ++transactions; rx.clear();
     if(a==0x48) rx.push_back(mask);
-    else if(a==0x0D) rx.push_back(pointer==0x8F && dftTimeout ? 0 : regs[pointer]);
+    else if(a==0x0D) {
+      const bool zero = mask == zeroDftMask && pointer >= 0x94 && pointer <= 0x97;
+      uint8_t value=regs[pointer];
+      if(pointer>=0x94 && pointer<=0x97 && (mask==0x11 || mask==0x12)) {
+        const int16_t real=mask==0x11?60:6000, imag=mask==0x11?80:8000;
+        const uint16_t word=(pointer<0x96)?uint16_t(real):uint16_t(imag);
+        value=(pointer==0x94 || pointer==0x96)?uint8_t(word>>8):uint8_t(word);
+      }
+      rx.push_back(zero || (pointer==0x8F && (dftTimeout || mask==timeoutMask)) ? 0 : value);
+    }
     return rx.size()<n?rx.size():n;
   }
   int available() { return static_cast<int>(rx.size()); }

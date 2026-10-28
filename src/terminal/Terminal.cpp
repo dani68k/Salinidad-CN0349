@@ -1,63 +1,99 @@
 #include "Terminal.h"
-
 #include <ctype.h>
 #include <string.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <math.h>
 
-const Terminal::Command Terminal::commands_[] = {
-    {"help", "Mostrar los comandos disponibles", &Terminal::printHelp},
-    {"info", "Mostrar firmware y configuracion I2C", &Terminal::printInfo},
-    {"i2c scan", "Sondear direcciones 0x08 a 0x77 sin escribir registros", &Terminal::startScan},
-    {"i2c status", "Mostrar estado I2C y ultimo diagnostico", &Terminal::printStatus},
-    {"clear", "Limpiar pantalla mediante ANSI", &Terminal::clear},
-};
-
-Terminal::Terminal(Stream& serial, TwoWire& wire) : serial_(serial), wire_(wire) {}
-
-bool Terminal::attachModule(void* context, ModuleHandler handler, ModuleBusy busy, const char* help) {
-  if (moduleCount_ >= MAX_MODULES) {
-    serial_.println("Error: se alcanzo el maximo de modulos del terminal.");
-    return false;
+namespace {
+const char* sensorsName(MeasurementSensors s) {
+  return s == MeasurementSensors::Both ? "PT100 EC" : s == MeasurementSensors::Pt100 ? "PT100" : "EC";
+}
+const char* stateName(InstrumentState s) {
+  switch (s) {
+    case InstrumentState::NotInitialized: return "NOT_INITIALIZED";
+    case InstrumentState::Calibrating: return "CALIBRATING";
+    case InstrumentState::Idle: return "IDLE";
+    case InstrumentState::Measuring: return "MEASURING";
+    case InstrumentState::Stopping: return "STOPPING";
+    case InstrumentState::Error: return "ERROR";
   }
-  modules_[moduleCount_++] = Module{context, handler, busy, help};
-  return true;
+  return "ERROR";
 }
-
-bool Terminal::moduleBusy() const {
-  for (size_t index = 0; index < moduleCount_; ++index) {
-    if (modules_[index].busy && modules_[index].busy(modules_[index].context)) return true;
+bool positiveInteger(const char* text, uint32_t& result) {
+  if (!*text) return false;
+  uint32_t value = 0;
+  for (; *text; ++text) {
+    if (*text < '0' || *text > '9') return false;
+    const uint8_t digit = *text - '0';
+    if (value > (0x7fffffffUL - digit) / 10) return false;
+    value = value * 10 + digit;
   }
-  return false;
+  if (!value) return false;
+  result = value; return true;
 }
-
-void Terminal::begin(bool i2cReady) {
-  i2cReady_ = i2cReady;
-  inputLength_ = 0;
-  input_[0] = '\0';
-  discardLine_ = false;
-  previousWasCr_ = false;
-  scanActive_ = false;
-  hasCompletedScan_ = false;
-  currentScan_ = ScanResult{};
-  lastScan_ = ScanResult{};
+const char* modelName(Conductivity::Model model) {
+  switch (model) {
+    case Conductivity::Model::Raw: return "RAW";
+    case Conductivity::Model::SeriesR2Experimental: return "SERIES";
+    case Conductivity::Model::AnalogDevices: return "ANALOG_DEVICES";
+  }
+  return "UNKNOWN";
 }
-
+const char* modelShortName(Conductivity::Model model) {
+  return model == Conductivity::Model::AnalogDevices ? "AD" : model == Conductivity::Model::SeriesR2Experimental ? "SERIES" : "RAW";
+}
+const char* conductivityErrorName(Conductivity::Error error) {
+  if (error == Conductivity::Error::CalibrationInvalid || error == Conductivity::Error::CalibrationMismatch)
+    return "ERR CAL_INVALID";
+  if (error == Conductivity::Error::NonPositiveAdmittance || error == Conductivity::Error::InvalidDenominator ||
+      error == Conductivity::Error::InvalidMagnitude) return "ERR OUT_OF_RANGE";
+  return "ERR MEASUREMENT_FAILED";
+}
+}
+Terminal::Terminal(Stream& serial, CN0349Manager& instrument) : serial_(serial), instrument_(instrument) {}
+void Terminal::begin() {
+  serial_.println("ATLANTES CN0349");
+  if (instrument_.getStatus().state == InstrumentState::Error) serial_.println("ERR HARDWARE");
+}
+const char* Terminal::errorName(InstrumentError error) {
+  switch (error) {
+    case InstrumentError::None: return "OK";
+    case InstrumentError::Busy: return "ERR BUSY";
+    case InstrumentError::InvalidArgument: return "ERR INVALID_ARGUMENT";
+    case InstrumentError::Hardware: return "ERR HARDWARE";
+    case InstrumentError::NotCalibrated: return "ERR NOT_CALIBRATED";
+    case InstrumentError::Timeout: return "ERR TIMEOUT";
+    case InstrumentError::MeasurementFailed: return "ERR MEASUREMENT_FAILED";
+    case InstrumentError::Cancelled: return "ERR CANCELLED";
+  }
+  return "ERR MEASUREMENT_FAILED";
+}
+void Terminal::reply(InstrumentError error) { serial_.println(errorName(error)); }
 void Terminal::update() {
-  // Presupuesto fijo para que un flujo continuo de entrada no monopolice loop().
-  for (size_t count = 0; count < Config::TERMINAL_BYTES_PER_UPDATE; ++count) {
-    if (serial_.available() <= 0) {
-      break;
-    }
-    const int value = serial_.read();
-    if (value < 0) {
-      break;
-    }
-    consume(static_cast<char>(value));
+  for (size_t i = 0; i < Config::TERMINAL_BYTES_PER_UPDATE && serial_.available() > 0; ++i) {
+    const int c = serial_.read(); if (c < 0) break;
+    consume(static_cast<char>(c));
   }
-  if (scanActive_) {
-    advanceScan();
+  const auto status = instrument_.getStatus();
+  if (status.calibrationRunId != calibrationRunId_) {
+    calibrationRunId_ = status.calibrationRunId;
+    serial_.print(status.validCalibrations == 4 ? "CAL OK " : "CAL PARTIAL ");
+    serial_.print(status.validCalibrations); serial_.println("/4");
+    if (!status.hardwareReady) serial_.println("ERR HARDWARE");
+    else {
+      serial_.print("AD LOW "); serial_.println(status.adLowValid ? "OK" : "INVALID");
+      serial_.print("AD HIGH "); serial_.println(status.adHighValid ? "OK" : "INVALID");
+      serial_.println(status.validCalibrations == 4 ? "READY" : "READY LIMITED");
+    }
+  }
+  MeasurementCycle cycle;
+  if (instrument_.takeMeasurementResult(cycle) && !cycle.cancelled) printCycle(cycle);
+  if (stopPending_ && status.state != InstrumentState::Stopping) {
+    stopPending_ = false;
+    serial_.println(status.hardwareReady ? "OK STOPPED" : "ERR HARDWARE");
   }
 }
-
 void Terminal::consume(char character) {
   if (character == '\n' && previousWasCr_) {
     previousWasCr_ = false;
@@ -85,14 +121,12 @@ void Terminal::consume(char character) {
   const unsigned char byte = static_cast<unsigned char>(character);
   if ((byte < 0x20 && character != '\t') || byte >= 0x7f) {
     discardLine_ = true;
-    serial_.println("Error: caracter no valido. Linea descartada; use comandos ASCII.");
+    serial_.println("ERR INVALID_ARGUMENT");
     return;
   }
   if (inputLength_ >= sizeof(input_) - 1) {
     discardLine_ = true;
-    serial_.print("Error: comando demasiado largo (maximo ");
-    serial_.print(static_cast<unsigned int>(sizeof(input_) - 1));
-    serial_.println(" caracteres). Linea descartada hasta fin de linea.");
+    serial_.println("ERR INVALID_ARGUMENT");
     return;
   }
   input_[inputLength_++] = character;
@@ -118,178 +152,153 @@ void Terminal::execute() {
   if (output == 0) {
     return;
   }
-  for (const Command& command : commands_) {
-    if (strcmp(input_, command.name) == 0) {
-      (this->*command.handler)();
+
+  char* args[6]{}; size_t count = 0; char* context = nullptr;
+  for (char* token = strtok_r(input_, " ", &context); token; token = strtok_r(nullptr, " ", &context)) {
+    if (count == 6) { reply(InstrumentError::InvalidArgument); return; }
+    args[count++] = token;
+  }
+  if (count == 1 && !strcmp(args[0], "help")) {
+    serial_.println("help | status");
+    serial_.println("setup show | setup interval <ms>");
+    serial_.println("setup ec range high|low | setup ec model raw|series|ad | setup ec k <K>");
+    serial_.println("cal status | cal show | cal run");
+    serial_.println("measure show | measure set PT100|EC|PT100 EC | measure once|start|stop");
+    return;
+  }
+  if (count == 1 && !strcmp(args[0], "status")) {
+    const auto s = instrument_.getStatus();
+    serial_.print(!s.hardwareReady ? "ERROR" : s.validCalibrations == 4 ? "READY" : "READY LIMITED");
+    serial_.print(" | "); serial_.print(sensorsName(instrument_.getSetup().sensors));
+    serial_.print(" | "); serial_.print(stateName(s.state));
+    serial_.print(" | CAL "); serial_.print(s.validCalibrations); serial_.println("/4"); return;
+  }
+  if (count == 2 && !strcmp(args[0], "cal")) {
+    if (!strcmp(args[1], "status")) {
+      uint8_t legacyValid = 0;
+      for (uint8_t i = 0; i < 4; ++i) {
+        CN0349Calibration c; instrument_.getCalibrationStatus(static_cast<CN0349Preset>(i), c);
+        if (c.compatibleWithCurrentConfig) ++legacyValid;
+      }
+      serial_.print("LEGACY "); serial_.print(legacyValid); serial_.print("/4 ");
+      serial_.println(legacyValid == 4 ? "OK" : "PARTIAL");
+      Conductivity::AdCalibration ad;
+      instrument_.getAdCalibrationStatus(CN0349EcRange::Low, ad);
+      serial_.print("AD LOW "); serial_.println(ad.valid ? "OK" : "ERR CAL_INVALID");
+      instrument_.getAdCalibrationStatus(CN0349EcRange::High, ad);
+      serial_.print("AD HIGH "); serial_.println(ad.valid ? "OK" : "ERR CAL_INVALID");
+      return;
+    }
+    if (!strcmp(args[1], "show")) {
+      static const char* names[] = {"HIGH_100R", "HIGH_1K", "LOW_1K", "LOW_10K"};
+      for (uint8_t i = 0; i < 4; ++i) {
+        CN0349Calibration c; instrument_.getCalibrationStatus(static_cast<CN0349Preset>(i), c);
+        serial_.print("LEGACY "); serial_.print(names[i]); serial_.print(" | GF ");
+        serial_.print(c.gainFactorPerOhm, 9); serial_.print(" 1/ohm/code | ID ");
+        serial_.print(c.calibrationId); serial_.print(" | ");
+        serial_.println(c.compatibleWithCurrentConfig ? "OK" : errorName(c.error));
+      }
+      const CN0349EcRange ranges[] = {CN0349EcRange::Low, CN0349EcRange::High};
+      for (const auto range : ranges) {
+        Conductivity::AdCalibration ad; instrument_.getAdCalibrationStatus(range, ad);
+        serial_.print("AD "); serial_.print(range == CN0349EcRange::Low ? "LOW" : "HIGH");
+        serial_.print(" | NL "); serial_.print(ad.nLow, 3);
+        serial_.print(" | NH "); serial_.print(ad.nHigh, 3);
+        serial_.print(" | GF "); serial_.print(ad.gainFactorSiemensPerCode, 12);
+        serial_.print(" S/code | NOS "); serial_.print(ad.systemOffsetCode, 3);
+        serial_.print(" | ID "); serial_.print(ad.calibrationId); serial_.print(" | ");
+        serial_.println(ad.valid ? "OK" : "ERR CAL_INVALID");
+      }
+      return;
+    }
+    if (!strcmp(args[1], "run")) { reply(instrument_.runCalibration()); return; }
+  }
+  if (count >= 2 && !strcmp(args[0], "measure")) {
+    if (count == 2) {
+      if (!strcmp(args[1], "show")) {
+        serial_.print("SENSORS "); serial_.println(sensorsName(instrument_.getSetup().sensors)); return;
+      }
+      if (!strcmp(args[1], "once")) {
+        const auto e = instrument_.startSingleMeasurement(); if (e != InstrumentError::None) reply(e); return;
+      }
+      if (!strcmp(args[1], "start")) {
+        const auto e = instrument_.startContinuousMeasurement();
+        if (e != InstrumentError::None) reply(e);
+        else { serial_.print("OK CONTINUOUS "); serial_.print(instrument_.getSetup().intervalMs); serial_.println(" ms"); }
+        return;
+      }
+      if (!strcmp(args[1], "stop")) {
+        const auto e = instrument_.stopMeasurement();
+        if (e != InstrumentError::None) reply(e); else stopPending_ = true;
+        return;
+      }
+    }
+    if (!strcmp(args[1], "set") && (count == 3 || count == 4)) {
+      uint8_t mask = 0;
+      for (size_t i = 2; i < count; ++i) {
+        const uint8_t bit = !strcmp(args[i], "pt100") ? 1 : !strcmp(args[i], "ec") ? 2 : 0;
+        if (!bit || (mask & bit)) { reply(InstrumentError::InvalidArgument); return; }
+        mask |= bit;
+      }
+      const auto e = instrument_.setMeasurementSensors(static_cast<MeasurementSensors>(mask));
+      if (e != InstrumentError::None) reply(e);
+      else { serial_.print("OK SENSORS "); serial_.println(sensorsName(instrument_.getSetup().sensors)); }
       return;
     }
   }
-  const bool busBusy = scanActive_ || moduleBusy();
-  for (size_t index = 0; index < moduleCount_; ++index) {
-    const Module& module = modules_[index];
-    if (module.handler && module.handler(module.context, input_, i2cReady_, busBusy)) return;
+  if (count >= 2 && !strcmp(args[0], "setup")) {
+    auto setup = instrument_.getSetup();
+    if (count == 2 && !strcmp(args[1], "show")) { printSetup(); return; }
+    if (count == 3 && !strcmp(args[1], "interval")) {
+      if (!positiveInteger(args[2], setup.intervalMs)) { reply(InstrumentError::InvalidArgument); return; }
+    } else if (count == 4 && !strcmp(args[1], "ec")) {
+      if (!strcmp(args[2], "range") && (!strcmp(args[3], "high") || !strcmp(args[3], "low"))) {
+        setup.ecRange = !strcmp(args[3], "high") ? CN0349EcRange::High : CN0349EcRange::Low;
+        setup.ecCalibration = setup.ecRange == CN0349EcRange::High ? CN0349Preset::CalHigh100R : CN0349Preset::CalLow10K;
+      } else if (!strcmp(args[2], "model") && (!strcmp(args[3], "raw") || !strcmp(args[3], "series") ||
+                 !strcmp(args[3], "ad") || !strcmp(args[3], "analog_devices"))) {
+        setup.ecModel = !strcmp(args[3], "raw") ? Conductivity::Model::Raw : !strcmp(args[3], "series") ?
+            Conductivity::Model::SeriesR2Experimental : Conductivity::Model::AnalogDevices;
+      } else if (!strcmp(args[2], "k")) {
+        char* end = nullptr; errno = 0;
+        setup.nominalKPerCm = strtof(args[3], &end);
+        if (errno || end == args[3] || *end || !isfinite(setup.nominalKPerCm) || setup.nominalKPerCm <= 0) {
+          reply(InstrumentError::InvalidArgument); return;
+        }
+      } else { reply(InstrumentError::InvalidArgument); return; }
+    } else { reply(InstrumentError::InvalidArgument); return; }
+    reply(instrument_.setSetup(setup)); return;
   }
-  serial_.print("Error: comando desconocido: ");
-  serial_.println(input_);
-  serial_.println("Escriba help para ver los comandos disponibles.");
+  reply(InstrumentError::InvalidArgument);
 }
-
-void Terminal::printHelp() {
-  serial_.println("Comandos disponibles:");
-  for (const Command& command : commands_) {
-    serial_.print("  ");
-    serial_.print(command.name);
-    serial_.print(" - ");
-    serial_.println(command.description);
-  }
-  for (size_t index = 0; index < moduleCount_; ++index) {
-    if (modules_[index].help) serial_.println(modules_[index].help);
-  }
+void Terminal::printSetup() {
+  const auto s = instrument_.getSetup();
+  serial_.print("SENSORS "); serial_.println(sensorsName(s.sensors));
+  serial_.print("INTERVAL "); serial_.print(s.intervalMs); serial_.println(" ms");
+  serial_.print("EC RANGE "); serial_.println(s.ecRange == CN0349EcRange::High ? "HIGH" : "LOW");
+  serial_.print("EC MODEL "); serial_.println(modelName(s.ecModel));
+  serial_.print("EC K "); serial_.print(s.nominalKPerCm, 3); serial_.println(" cm-1");
 }
-
-void Terminal::printI2cConfig() {
-  serial_.print("I2C SDA: GPIO");
-  serial_.println(Config::I2C_SDA_PIN);
-  serial_.print("I2C SCL: GPIO");
-  serial_.println(Config::I2C_SCL_PIN);
-  serial_.print("I2C frecuencia configurada: ");
-  serial_.print(Config::I2C_FREQUENCY_HZ);
-  serial_.println(" Hz");
-  serial_.print("I2C timeout configurado: ");
-  serial_.print(Config::I2C_TIMEOUT_MS);
-  serial_.println(" ms");
-}
-
-void Terminal::printInfo() {
-  serial_.println(Config::FIRMWARE_NAME);
-  serial_.print("Firmware: ");
-  serial_.println(Config::FIRMWARE_VERSION);
-  serial_.print("Hito: ");
-  serial_.println(Config::MILESTONE);
-  printI2cConfig();
-}
-
-void Terminal::printHex(uint8_t value) {
-  serial_.print("0x");
-  if (value < 0x10) {
-    serial_.print('0');
+void Terminal::printCycle(const MeasurementCycle& c) {
+  const bool pt = c.setup.sensors != MeasurementSensors::Ec, ec = c.setup.sensors != MeasurementSensors::Pt100;
+  if (pt) {
+    serial_.print("PT100 | ");
+    if (c.pt100.valid) {
+      serial_.print(c.pt100.temperature.celsius, 2); serial_.print(" C");
+      if (!ec) { serial_.print(" | "); serial_.print(c.pt100.acquisition.apparentImpedanceOhms, 2); serial_.print(" ohm"); }
+    } else serial_.print(errorName(c.pt100.error));
   }
-  serial_.print(value, HEX);
-}
-
-const char* Terminal::resultDescription(uint8_t code) {
-  switch (code) {
-    case 0: return "ACK";
-    case 1: return "datos demasiado largos";
-    case 2: return "NACK de direccion (sin respuesta)";
-    case 3: return "NACK de datos";
-    case 4: return "error de comunicacion";
-    case 5: return "timeout";
-    default: return "error no reconocido";
+  if (ec) {
+    if (pt) serial_.print(" | "); serial_.print("EC | ");
+    if (c.ec.valid) {
+      serial_.print(c.ec.conductivity.microSiemensPerCm, 1); serial_.print(" uS/cm");
+      serial_.print(" | "); serial_.print(modelShortName(c.setup.ecModel));
+    } else {
+      serial_.print(modelShortName(c.setup.ecModel)); serial_.print(" | ");
+      serial_.print(c.ec.conductivity.error != Conductivity::Error::NotRun ?
+          conductivityErrorName(c.ec.conductivity.error) : errorName(c.ec.error));
+    }
   }
-}
-
-void Terminal::startScan() {
-  if (moduleBusy()) {
-    serial_.println("Error: diagnostico de modulo en curso; espere a que termine.");
-    return;
-  }
-  if (!i2cReady_) {
-    serial_.println("Error: I2C no inicializado. Revise la configuracion y reinicie.");
-    return;
-  }
-  if (scanActive_) {
-    serial_.println("Error: ya hay un escaneo I2C en curso.");
-    return;
-  }
-  currentScan_ = ScanResult{};
-  nextAddress_ = Config::I2C_FIRST_ADDRESS;
-  scanActive_ = true;
-  serial_.println("I2C Scan");
-  serial_.println("---------");
-}
-
-void Terminal::advanceScan() {
-  const uint8_t address = nextAddress_;
-  wire_.beginTransmission(address);
-  // Solo direccion + STOP: no se encola ningun byte ni direccion de registro.
-  const uint8_t code = wire_.endTransmission();
-  ++currentScan_.probed;
-  currentScan_.lastAddress = address;
-  currentScan_.lastCode = code;
-  if (code == 0) {
-    ++currentScan_.found;
-    serial_.print("Device found: ");
-    printHex(address);
-    serial_.println();
-  } else if (code == 2) {
-    ++currentScan_.nack;
-  } else {
-    ++currentScan_.errors;
-    currentScan_.lastErrorAddress = address;
-    currentScan_.lastErrorCode = code;
-    serial_.print("I2C error at ");
-    printHex(address);
-    serial_.print(": ");
-    serial_.print(resultDescription(code));
-    serial_.print(" (Wire code ");
-    serial_.print(code);
-    serial_.println(')');
-  }
-  if (address == Config::I2C_LAST_ADDRESS) {
-    scanActive_ = false;
-    lastScan_ = currentScan_;
-    hasCompletedScan_ = true;
-    serial_.print("Scan completed: ");
-    serial_.print(lastScan_.found);
-    serial_.println(" device(s)");
-    printScanResult(lastScan_);
-  } else {
-    ++nextAddress_;
-  }
-}
-
-void Terminal::printScanResult(const ScanResult& result) {
-  serial_.print("Direcciones sondeadas: ");
-  serial_.print(result.probed);
-  serial_.print("; ACK: ");
-  serial_.print(result.found);
-  serial_.print("; NACK de direccion: ");
-  serial_.print(result.nack);
-  serial_.print("; errores: ");
-  serial_.println(result.errors);
-  if (result.probed > 0) {
-    serial_.print("Ultima transaccion: ");
-    printHex(result.lastAddress);
-    serial_.print("; ");
-    serial_.println(resultDescription(result.lastCode));
-  }
-  if (result.errors > 0) {
-    serial_.print("Ultimo error: ");
-    printHex(result.lastErrorAddress);
-    serial_.print("; Wire code ");
-    serial_.print(result.lastErrorCode);
-    serial_.print("; ");
-    serial_.println(resultDescription(result.lastErrorCode));
-  }
-}
-
-void Terminal::printStatus() {
-  printI2cConfig();
-  serial_.print("Inicializacion I2C: ");
-  serial_.println(i2cReady_ ? "correcta (no garantiza respuesta de dispositivos)" : "fallida");
-  if (scanActive_) {
-    serial_.println("Escaneo en curso:");
-    printScanResult(currentScan_);
-  }
-  if (hasCompletedScan_) {
-    serial_.println("Ultimo diagnostico completado:");
-    printScanResult(lastScan_);
-  } else {
-    serial_.println("Ultimo diagnostico completado: ninguno.");
-  }
-}
-
-void Terminal::clear() {
-  serial_.print("\x1b[2J\x1b[H");
+  if (c.valid) serial_.print(" | OK");
+  serial_.println();
 }

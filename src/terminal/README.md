@@ -1,52 +1,39 @@
-# Terminal de diagnóstico
+# Terminal operativo — Hito 2F
 
-`Terminal.h` y `Terminal.cpp` implementan un receptor de líneas y un escáner I²C
-independientes de los futuros drivers. Las respuestas usan texto ASCII para
-facilitar su lectura en monitores serie.
+## Hito 2G
 
-## Interfaz
+`setup ec model raw|series|ad|analog_devices` selecciona las tres ramas.
+`cal status` añade AD LOW/HIGH. Las medidas muestran RAW, SERIES o AD; GF, NOS,
+NX y admitancias permanecen en el snapshot diagnóstico.
 
-- `Terminal(Stream&, TwoWire&)`: inyecta entrada/salida y bus; no inicializa hardware.
-- `begin(bool i2cReady)`: reinicia entrada e historial y registra el resultado de inicialización.
-- `update()`: consume hasta 32 bytes disponibles y realiza como máximo un sondeo.
-- `printInfo()`: imprime identidad y parámetros configurados, sin acceder al bus.
-- `attachModule(context, handler, busy, help)`: registra un módulo mediante
-  callbacks, sin que el terminal dependa de su driver. Hay tres espacios
-  estáticos para ImpedanceApp, MuxApp y CN0349Manager; un cuarto se rechaza.
+`cal show` ofrece bajo demanda los cuatro Gain Factors legacy con ID y los dos
+rangos AD con NL, NH, GF en S/code, NOS, ID y validez. Es una consulta de RAM:
+no inicia calibración, no accede al bus I²C y no altera resultados publicados.
 
-Se usa `Serial` en producción. Los handlers y descripciones están en `commands_`;
-para ampliar comandos se añade un método y una entrada en esa tabla. `help` y
-el despacho comparten la tabla. Después consulta el callback de aplicación con
-la línea normalizada y el estado de ocupación de I²C. `help` incluye la ayuda del
-módulo. No se reserva memoria dinámica en esta clase.
+Propósito: interpretar comandos, validar argumentos, llamar a CN0349Manager y
+formatear respuestas compactas. Constructor `Terminal(Stream&, CN0349Manager&)`;
+`begin` imprime cabecera; `update` procesa entrada y publica cambios/resultados.
+No conoce Wire, drivers ni detalles de secuenciación de sensores.
 
-## Entrada y errores
+Buffer fijo de 96 bytes y presupuesto 32 bytes/update, CRLF, tabuladores,
+backspace y normalización de mayúsculas/espacios. Líneas desbordadas o con
+caracteres no ASCII se descartan completas y generan ERR INVALID_ARGUMENT.
+Números enteros positivos sin signo, overflow y argumentos sobrantes se
+rechazan. K requiere valor finito y positivo; sensores duplicados se rechazan.
 
-Buffer de 96 bytes, incluidos 95 caracteres y NUL. CR, LF y CRLF terminan la
-línea; un LF después de CR no vuelve a ejecutarla, incluso entre llamadas.
-Se ignoran líneas vacías o con solo espacios, se normalizan mayúsculas y espacios
-y se aceptan tabuladores. Retroceso y DEL borran un carácter del buffer; no hay
-eco ni edición visual. Caracteres no ASCII o de control no admitidos invalidan
-la línea. Al exceder el límite se informa una vez y se descarta todo hasta CR/LF,
-incluidos retrocesos posteriores. El siguiente comando vuelve a procesarse.
-No se aceptan argumentos extra ni coincidencias por prefijo.
+Comandos: help, status; setup show/interval, setup ec range high|low,
+setup ec model raw|series, setup ec k; cal status/show/run; measure show/set/once/
+start/stop. `measure set` admite PT100, EC, PT100 EC y EC PT100. `series` se
+rechaza porque no está verificada la topología. [Sintaxis y formatos](../../docs/architecture.md).
 
-## Comandos y diagnóstico
+El controlador decide Busy/NotCalibrated/Hardware. El terminal continúa
+atendiendo consultas y stop durante adquisición. Se mantiene un anuncio de
+calibración por calibrationRunId y un reconocimiento de stop pendiente hasta
+que el hardware termina. Solo se imprimen ciclos completos, con errores por
+sensor; no se imprime OK si alguno falla. Los cancelados se consumen y omiten.
+No se imprimen DFT/GF/REAL/IMAG en operación normal; siguen en snapshots.
 
-`help`, `info`, `i2c scan`, `i2c status` y `clear` forman la interfaz inicial.
-`clear` emite `ESC[2J ESC[H` sin modificar el historial del diagnóstico.
-
-`i2c scan` inicia un estado cooperativo y rechaza una segunda solicitud mientras
-está activo. Cada `update()` sondea la siguiente dirección de `0x08` a `0x77`
-mediante `beginTransmission()` y `endTransmission()` con STOP y sin `write()`.
-Solo ACK produce `Device found`. NACK de dirección significa sin respuesta;
-otros códigos producen un mensaje de error con dirección y código.
-
-Al completar se copian contadores y última transacción/error al historial.
-`i2c status` distingue el progreso actual del último escaneo completo, que sigue
-disponible durante un nuevo escaneo. Antes del primero informa «ninguno».
-La inicialización fallida impide sondear pero permite todos los demás comandos.
-
-Una transacción Wire es síncrona y tiene timeout de 25 ms configurado por `main`;
-la transmisión de respuestas serie también puede esperar. No hay bucles de
-espera de entrada ni un bucle que recorra todo el bus en una sola llamada.
+Dependencias: Arduino Stream, Config y API de CN0349Manager. Se retiran tabla
+de módulos, escáner I²C, info/clear y los tres parsers experimentales. El terminal
+es actualmente el consumidor único de takeMeasurementResult; futura BLE debe
+compartir un dispatcher según el contrato de arquitectura.

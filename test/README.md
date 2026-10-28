@@ -1,3 +1,13 @@
+# Estado vigente — Hito 2F, 2026-10-27
+
+Consultar [validación 2F](hito2f.md) y [suite host](host_cn0349/README.md).
+Suite MSVC: 7 grupos PASS; suites Unity conservadas: Pt100 3 PASS y AD5934
+11 PASS. Firmware compilado con PlatformIO para ESP32-S3. Validación física
+pendiente antes de Hito 3. Los procedimientos siguientes son históricos y
+sus comandos antiguos ya no corresponden a la interfaz 2F.
+
+---
+
 # Validación de Hitos 1A, 1B, 1C, 1D y 1E
 
 Este directorio contiene procedimientos manuales y pruebas unitarias host

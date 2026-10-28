@@ -1,3 +1,21 @@
+# Hito 2F — configuración vigente (2026-10-27)
+
+## Hito 2G
+
+`MILESTONE` pasa a `2G`. K=1 cm⁻¹ y R2=100 Ω siguen siendo nominales. Las
+estructuras AD viven en Conductivity/CN0349Manager, no en Config.
+
+`config.h` contiene versión 1.0.0/Hito 2F, pines I²C, baudrate, timeout 25 ms,
+K/R2 nominales y límites del buffer/servicio del terminal. Sin NVS ni estado
+mutable global. El setup operativo reside únicamente en CN0349Manager.
+`ad5934_math.h` conserva fórmulas DDS/control y `impedance_diagnostics.h`
+conserva errores tipados y registros de recuperación usados por ImpedanceApp.
+La API y los errores de instrumento están en CN0349Manager.h. Estos headers
+no realizan I²C ni imprimen; main inicializa dependencias. Las notas posteriores
+son historial de hitos anteriores.
+
+---
+
 # Configuración compartida
 
 `config.h` contiene constantes `constexpr` en el espacio `Config`: identidad,

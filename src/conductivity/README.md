@@ -1,5 +1,13 @@
 # Módulo Conductivity — Hito 2E.3
 
+## Hito 2G — ANALOG_DEVICES
+
+`AdCalibration`, `calibrateAnalogDevices` y `convertAnalogDevices` son
+funciones puras. Separan el Gain Factor legacy de la pendiente AD e implementan
+las ecuaciones 1–4 de CN-0349 Rev. A con `double`. Devuelven ID, NX, GF, NOS,
+YX, YCELL, denominador, K, unidades y error. K sigue nominal y no hay patrón
+certificado, compensación térmica o validación física.
+
 `Conductivity.h` es una conversión pura, sin I²C ni acceso a AD5934/ADG715.
 Recibe impedancia aparente, K nominal, modelo y R2 nominal; devuelve
 resistencia de celda estimada, µS/cm, mS/cm, validez y error explícito.

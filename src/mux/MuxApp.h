@@ -4,7 +4,6 @@
 #include <ADG715.h>
 #include <Arduino.h>
 
-class Terminal;
 
 class MuxApp {
  public:
@@ -18,14 +17,11 @@ class MuxApp {
     const char* description;
   };
   using CalibrationInfo = Preset;
-  MuxApp(ADG715& mux, AD5934& impedance, Stream& output);
-  void begin(Terminal& terminal);
-  void reportConnection(bool ready);
-  bool selectPreset(const char* name, bool quiet = false);
+  MuxApp(ADG715& mux, AD5934& impedance);
+  bool selectPreset(const char* name);
   bool resolveCalibrationPreset(CalibrationPreset id, CalibrationInfo& info) const;
-  bool calibrationPresetByName(const char* name, CalibrationInfo& info) const;
   bool pt100Info(CalibrationInfo& info) const;
-  bool applyPt100(bool quiet = false);
+  bool applyPt100();
   bool ecInfo(uint8_t mask, CalibrationInfo& info) const;
   bool applyEc(uint8_t mask);
   bool applyCalibrationPreset(CalibrationPreset id);
@@ -38,29 +34,15 @@ class MuxApp {
   uint8_t lastWireError() const { return mux_.getLastWireError(); }
   bool knownPresetMask(uint8_t mask) const { return presetByMask(mask) != nullptr; }
   uint8_t address() const { return mux_.address(); }
-  void update() {}
 
  private:
   static const Preset presets_[];
-  static bool dispatch(void* context, char* line, bool busReady, bool busBusy);
-  static bool busy(void*) { return false; }
-  bool process(char* line, bool busReady, bool busBusy);
-  bool setAuthorized(uint8_t mask, bool quiet = false);
+  bool setAuthorized(uint8_t mask);
   bool impedanceIsSafe();
-  void help();
-  void presets();
-  void readState();
-  void status();
-  void printState(uint8_t state);
-  void printSwitches(uint8_t state);
-  void printLastError();
-  void printHex(uint8_t value);
   const Preset* presetByName(const char* name) const;
   const Preset* presetByMask(uint8_t mask) const;
-  static bool parseHex(const char* text, uint8_t& value);
   ADG715& mux_;
   AD5934& impedance_;
-  Stream& output_;
   bool hasObservedMask_ = false;
   uint8_t observedMask_ = 0;
 };

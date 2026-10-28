@@ -5,19 +5,25 @@
 #include "../../src/cn0349/CN0349Manager.h"
 #include "../../src/cn0349/ImpedanceMath.h"
 #include "../../src/terminal/Terminal.h"
-#define CHECK(x) do { if(!(x)) throw std::runtime_error(#x); } while(0)
-using E=CN0349ImpedanceError;
-using S=CN0349ImpedanceState;
-using P=CN0349Preset;
+#define CHECK(x) do { if (!(x)) throw std::runtime_error(std::string(__FUNCTION__)+":"+std::to_string(__LINE__)+" " #x); } while(0)
+using E = InstrumentError;
+using S = MeasurementSensors;
+using P = CN0349Preset;
 struct Fixture {
   Stream serial; TwoWire wire; AD5934 ad{wire}; ADG715 muxDriver{wire};
-  MuxApp mux{muxDriver,ad,serial}; ImpedanceApp app{ad,mux,serial};
-  Terminal terminal{serial,wire}; CN0349Manager manager{app,serial};
-  Fixture() { terminal.begin(true); app.begin(terminal); mux.begin(terminal); CHECK(manager.begin(terminal,true)); CHECK(manager.runDiagnostics()); }
-  void tick() { hostClock()+=10; manager.update(); }
-  void finish() { for(int i=0;i<2000 && manager.isBusy();++i) tick(); CHECK(!manager.isBusy()); }
+  MuxApp mux{muxDriver,ad}; ImpedanceApp app{ad,mux}; CN0349Manager manager{app};
+  Terminal terminal{serial,manager};
+  void begin() { CHECK(manager.begin(true)==E::None); terminal.begin(); }
+  void tick(uint32_t dt=10) { hostClock()+=dt; manager.update(); }
+  void finish() { for(int i=0;i<4000 && manager.isBusy();++i) tick(); CHECK(!manager.isBusy()); }
+  void ready() { begin(); finish(); CHECK(manager.getStatus().validCalibrations==4); terminal.update(); }
   void command(const std::string& text) { serial.input=text+"\n"; while(serial.available()) terminal.update(); }
-  void calibrate(P p) { CHECK(manager.startCalibration(p)==CN0349CalibrationError::None); finish(); CHECK(manager.calibrationState()==CN0349CalibrationState::Complete); }
+  void cycle() { const auto before=manager.getStatus().publishedCycles;
+    for(int i=0;i<4000 && manager.getStatus().publishedCycles==before;++i) tick();
+    CHECK(manager.getStatus().publishedCycles==before+1);
+  }
+  MeasurementCycle result() { MeasurementCycle r; CHECK(manager.getMeasurementResult(r)); return r; }
+  void standby() { CHECK((wire.regs[0x80]&0xf0)==0xb0 && wire.regs[0x81]==8); }
 };
 void mathTests() {
   float z=-1, phase=-1;
@@ -48,337 +54,269 @@ void mathTests() {
   for(float bad : {0.0f,-1.0f,NAN,INFINITY})
     CHECK(Conductivity::convert(100,bad,Conductivity::Model::Raw,100).error==Conductivity::Error::InvalidCellConstant);
   CHECK(Conductivity::convert(1.0e-38f,FLT_MAX,Conductivity::Model::Raw,100).error==Conductivity::Error::Overflow);
+  auto ad=Conductivity::calibrateAnalogDevices(1000,10000,0.0001,0.001,1000,2000,1,1,42);
+  CHECK(ad.valid && ad.error==Conductivity::AdCalibrationError::None);
+  CHECK(fabs(ad.gainFactorSiemensPerCode-1e-7)<1e-15 && fabs(ad.systemOffsetCode)<1e-12);
+  auto low=Conductivity::convertAnalogDevices(1000,1,100,ad,2000,1000,1,1);
+  auto high=Conductivity::convertAnalogDevices(10000,1,100,ad,2000,1000,1,1);
+  CHECK(low.valid && fabs(low.measuredAdmittanceSiemens-0.0001)<1e-12);
+  CHECK(high.valid && fabs(high.measuredAdmittanceSiemens-0.001)<1e-12);
+  auto synthetic=Conductivity::convertAnalogDevices(5000,1,100,ad,2000,1000,1,1);
+  CHECK(synthetic.valid && fabs(synthetic.measuredAdmittanceSiemens-0.0005)<1e-12);
+  CHECK(fabs(synthetic.cellAdmittanceSiemens-0.000526315789)<1e-12);
+  CHECK(fabs(synthetic.microSiemensPerCm-526.315789)<0.0001 && synthetic.calibrationId==42);
+  auto adHigh=Conductivity::calibrateAnalogDevices(1000,10000,0.001,0.01,100,2000,1,1,43);
+  CHECK(adHigh.valid);
+  CHECK(Conductivity::convertAnalogDevices(1000,1,100,adHigh,2000,100,1,1).valid);
+  CHECK(Conductivity::convertAnalogDevices(10000,1,100,adHigh,2000,100,1,1).error==Conductivity::Error::InvalidDenominator);
+  CHECK(Conductivity::convertAnalogDevices(11000,1,100,adHigh,2000,100,1,1).error==Conductivity::Error::InvalidDenominator);
+  CHECK(!Conductivity::calibrateAnalogDevices(1,1,.0001,.001,1000,2000,1,1,1).valid);
+  CHECK(!Conductivity::calibrateAnalogDevices(2,1,.0001,.001,1000,2000,1,1,1).valid);
+  CHECK(!Conductivity::calibrateAnalogDevices(NAN,2,.0001,.001,1000,2000,1,1,1).valid);
+  CHECK(Conductivity::convertAnalogDevices(-1,1,100,ad,2000,1000,1,1).error==Conductivity::Error::NonPositiveAdmittance);
+  CHECK(Conductivity::convertAnalogDevices(NAN,1,100,ad,2000,1000,1,1).error==Conductivity::Error::InvalidMagnitude);
+  CHECK(Conductivity::convertAnalogDevices(5000,0,100,ad,2000,1000,1,1).error==Conductivity::Error::InvalidCellConstant);
+  CHECK(Conductivity::convertAnalogDevices(5000,-1,100,ad,2000,1000,1,1).error==Conductivity::Error::InvalidCellConstant);
+  CHECK(Conductivity::convertAnalogDevices(5000,1,100,ad,2001,1000,1,1).error==Conductivity::Error::CalibrationMismatch);
+  CHECK(Conductivity::convertAnalogDevices(5000,1,100,ad,2000,100,1,1).error==Conductivity::Error::CalibrationMismatch);
+  Conductivity::AdCalibration absent;
+  CHECK(Conductivity::convertAnalogDevices(5000,1,100,absent,2000,1000,1,1).error==Conductivity::Error::CalibrationInvalid);
+  auto corrupt=ad; corrupt.gainFactorSiemensPerCode=-1;
+  CHECK(Conductivity::convertAnalogDevices(5000,1,100,corrupt,2000,1000,1,1).error==Conductivity::Error::CalibrationInvalid);
+  corrupt=ad; corrupt.gainFactorSiemensPerCode=INFINITY;
+  CHECK(Conductivity::convertAnalogDevices(5000,1,100,corrupt,2000,1000,1,1).error==Conductivity::Error::CalibrationInvalid);
+  corrupt=ad; corrupt.systemOffsetCode=NAN;
+  CHECK(Conductivity::convertAnalogDevices(5000,1,100,corrupt,2000,1000,1,1).error==Conductivity::Error::CalibrationInvalid);
 }
 
-void conductivityTests() {
-  Fixture f;
-  f.command("cn0349 conductivity model list");
-  f.command("cn0349 conductivity model set SERIES_R2_EXPERIMENTAL");
-  CHECK(f.manager.conductivityModel()==Conductivity::Model::Raw);
-  CHECK(f.serial.output.find("topology not physically verified")!=std::string::npos);
-  CHECK(f.manager.startConductivity()==E::InvalidCalibration);
-  for(int i=0;i<4;++i) f.calibrate(static_cast<P>(i));
-  CHECK(f.manager.selectEcRange(CN0349EcRange::Low)==E::None);
-  CHECK(f.manager.selectEcCalibration(P::CalLow1K)==E::None);
-  f.command("cn0349 conductivity config");
-  f.command("cn0349 conductivity start");
-  CHECK(f.manager.isEcRunning());
-  CHECK(!f.manager.selectConductivityModel(Conductivity::Model::Raw));
-  f.finish();
-  auto result=f.manager.getConductivityResult();
-  CHECK(result.valid && result.ec.acquisition.valid && result.ec.standbyVerified);
-  CHECK(result.ec.acquisition.measurementMask==0x82);
-  CHECK(result.ec.acquisition.calibrationPreset==P::CalLow1K);
-  CHECK(result.conversion.model==Conductivity::Model::Raw);
-  CHECK(result.conversion.nominalKPerCm==1.0f && result.conversion.r2Ohms==100.0f);
-  CHECK(fabs(result.conversion.cellResistanceOhms-result.ec.acquisition.apparentImpedanceOhms)<0.001f);
-  CHECK(fabs(result.conversion.microSiemensPerCm-1.0e6f/result.conversion.cellResistanceOhms)<0.01f);
-  f.command("cn0349 conductivity result");
-  CHECK(f.serial.output.find("CONDUCTIVITY - EXPERIMENTAL / NOT CALIBRATED")!=std::string::npos);
-  CHECK(f.serial.output.find("REAL/IMAG/DFT magnitude")!=std::string::npos);
-  CHECK(f.serial.output.find("Estimated conductivity uS/cm")!=std::string::npos);
-  CHECK(f.manager.selectEcRange(CN0349EcRange::High)==E::None);
-  CHECK(f.manager.getConductivityResult().ec.acquisition.measurementMask==0x82);
-  f.wire.setDft(0,0);
-  CHECK(f.manager.startConductivity()==E::IncompatibleCalibration);
-  CHECK(f.manager.getConductivityResult().ec.acquisition.measurementMask==0x82);
-  CHECK(f.manager.selectEcCalibration(P::CalHigh100R)==E::None);
-  CHECK(f.manager.startConductivity()==E::None); f.finish();
-  result=f.manager.getConductivityResult();
-  CHECK(!result.valid && !result.ec.acquisition.valid);
-  CHECK(result.conversion.nominalKPerCm==1.0f && result.conversion.r2Ohms==100.0f);
-  f.wire.setDft(600,800);
-  CHECK(f.manager.startConductivity()==E::None);
-  CHECK(f.manager.cancelConductivity()); f.finish();
-  CHECK(!f.manager.getConductivityResult().valid);
-}
-void measurementTests() {
-  Fixture f;
-  CHECK(f.manager.getImpedanceResult().state==S::Idle);
-  f.command("i2c scan"); f.command("cn0349 impedance start"); CHECK(f.manager.impedanceRequestError()==E::Busy);
-  for(int i=0;i<120;++i) f.terminal.update();
-  CHECK(f.manager.startImpedance()==E::InvalidCalibration);
-  CHECK(f.manager.selectImpedanceCalibration(static_cast<P>(99))==E::InvalidCalibration);
-  CHECK(f.manager.selectImpedanceCalibration(P::CalLow1K)==E::IncompatibleCalibration);
-  for(int i=0;i<4;++i) f.calibrate(static_cast<P>(i));
-  CN0349Calibration before[4]; for(int i=0;i<4;++i) CHECK(f.manager.getCalibration(static_cast<P>(i),before[i]));
-  for(P p : {P::CalHigh100R,P::CalHigh1K}) {
-    CHECK(f.manager.selectImpedanceCalibration(p)==E::None);
-    CHECK(f.manager.startImpedance()==E::None); CHECK(f.wire.mask==0x41);
-    CHECK(f.manager.getStatus().activeOperation==CN0349Operation::Impedance);
-    CHECK(f.manager.startImpedance()==E::Busy); CHECK(!f.manager.startSingle());
-    CHECK(!f.manager.clearCalibrations()); CHECK(f.manager.selectImpedanceCalibration(p)==E::Busy);
-    f.finish(); auto r=f.manager.getImpedanceResult(); CHECK(r.valid && r.state==S::Complete);
-    CHECK(r.real==600 && r.imag==800 && r.magnitude==1000);
-    CHECK(fabs(r.apparentImpedanceOhms-(p==P::CalHigh100R?100:1000))<0.01f);
-    CHECK(f.wire.regs[0x80]==0xB1 && f.wire.regs[0x81]==8);
-  }
-  CHECK(f.manager.configureSingle({P::CalLow1K,3000,10})); CHECK(f.manager.startImpedance()==E::InvalidFrequency);
-  CHECK(f.manager.configureSingle({P::CalLow1K,2000,11})); CHECK(f.manager.startImpedance()==E::IncompatibleCalibration);
-  CHECK(f.manager.configureSingle({P::CalLow1K,2000,10}));
-  CHECK(f.manager.startImpedance()==E::None); CHECK(f.manager.cancelImpedance()); f.finish();
-  CHECK(f.manager.getImpedanceResult().state==S::Cancelled);
-  CN0349ImpedanceResult saved; CHECK(f.manager.getLastValidImpedanceResult(saved) && saved.valid);
-  CHECK(f.manager.startImpedance()==E::None); f.command("ad5934 measure stop"); f.finish();
-  CHECK(f.manager.getImpedanceResult().state==S::Cancelled);
-  f.wire.setDft(0,0); CHECK(f.manager.startImpedance()==E::None); f.finish();
-  CHECK(f.manager.getImpedanceResult().error==E::InvalidData); CHECK(f.manager.getLastValidImpedanceResult(saved));
-  f.wire.setDft(600,800); f.wire.dftTimeout=true;
-  CHECK(f.manager.startImpedance()==E::None); f.finish(); CHECK(f.manager.getImpedanceResult().state==S::Failed);
-  CHECK(f.wire.regs[0x80]==0xB1); f.wire.dftTimeout=false; CHECK(f.manager.recover());
-  CHECK(f.manager.startSingle()); f.finish(); CN0349RawResult raw; CHECK(f.manager.getSingleResult(raw));
-  CHECK(f.manager.startSweep()); f.finish(); CN0349SweepResult sweep; CHECK(f.manager.getSweepResult(sweep)); CHECK(sweep.pointsValid==9);
-  CHECK(f.manager.runDiagnostics());
-  for(int i=0;i<4;++i) { CN0349Calibration c; CHECK(f.manager.getCalibration(static_cast<P>(i),c)); CHECK(c.calibrationId==before[i].calibrationId && c.gainFactorPerOhm==before[i].gainFactorPerOhm); }
-  for(const char* c : {"cn0349 impedance help","cn0349 impedance config","cn0349 impedance cal list","cn0349 impedance cal set CAL_HIGH_100R","cn0349 impedance cal set CAL_HIGH_1K","cn0349 impedance status","cn0349 impedance result"}) f.command(c);
-  f.command("cn0349 impedance cal set nonexistent"); CHECK(f.manager.impedanceRequestError()==E::InvalidCalibration);
-  f.command("cn0349 impedance cal set CAL_LOW_1K"); CHECK(f.manager.impedanceRequestError()==E::IncompatibleCalibration);
-  unsigned transactions=f.wire.transactions; f.command("cn0349 impedance status"); f.command("cn0349 impedance config"); f.command("cn0349 impedance result"); CHECK(transactions==f.wire.transactions);
-  f.command("cn0349 impedance start"); CHECK(f.manager.isBusy()); f.command("cn0349 impedance stop"); f.finish(); CHECK(f.manager.getImpedanceResult().state==S::Cancelled);
-}
-void failureTests() {
-  Fixture f; f.calibrate(P::CalHigh100R); f.wire.muxMismatch=true;
-  CHECK(f.manager.startImpedance()==E::AcquisitionFailed); f.finish(); CHECK(f.manager.getImpedanceResult().state==S::Failed); CHECK(f.wire.regs[0x80]==0xB1);
-  f.wire.muxMismatch=false; CHECK(f.manager.recover()); CHECK(f.manager.startImpedance()==E::None);
-  f.wire.standbyFailure=true; f.finish(); CHECK(!f.manager.getImpedanceResult().valid); CHECK(f.manager.getImpedanceResult().state==S::Failed);
-}
-void temperatureTests() {
-  Fixture f;
-  CHECK(!f.manager.getTemperatureResult().valid);
-  CHECK(f.manager.startTemperature()==E::InvalidCalibration);
-  CHECK(f.manager.getTemperatureResult().acquisition.error==E::InvalidCalibration);
-  CHECK(f.manager.getTemperatureResult().conversion.error==Pt100::Error::NotAttempted);
-  f.calibrate(P::CalHigh100R); f.calibrate(P::CalHigh1K);
-  CHECK(f.manager.startTemperature()==E::None);
-  CHECK(f.manager.getTemperatureResult().acquisition.state==S::Running);
-  CHECK(f.manager.startTemperature()==E::Busy);
-  f.finish(); auto first=f.manager.getTemperatureResult();
-  CHECK(first.valid && fabs(first.conversion.celsius)<0.001);
-  CHECK(first.acquisition.real==600 && first.acquisition.imag==800);
-  CHECK(!first.cableCompensationApplied);
-  CHECK(f.manager.selectImpedanceCalibration(P::CalHigh1K)==E::None);
-  // Selecting/recalibrating/using impedance must never reinterpret saved temperature.
-  CHECK(f.manager.getTemperatureResult().acquisition.calibrationId==first.acquisition.calibrationId);
-  CHECK(f.manager.startImpedance()==E::None); f.finish();
-  CHECK(f.manager.getTemperatureResult().conversion.celsius==first.conversion.celsius);
-  f.command("cn0349 temperature start"); f.finish();
-  auto outside=f.manager.getTemperatureResult();
-  CHECK(outside.acquisition.valid && !outside.valid);
-  CHECK(outside.acquisition.calibrationPreset==P::CalHigh1K);
-  CHECK(outside.acquisition.calibrationId!=first.acquisition.calibrationId);
-  CHECK(outside.conversion.error==Pt100::Error::OutOfRange);
-  CHECK(f.manager.selectImpedanceCalibration(P::CalHigh100R)==E::None);
-  CHECK(f.manager.startTemperature()==E::None); f.command("cn0349 temperature stop"); f.finish();
-  CHECK(f.manager.getTemperatureResult().acquisition.state==S::Cancelled);
-  CHECK(!f.manager.getTemperatureResult().valid);
-  f.wire.dftTimeout=true; CHECK(f.manager.startTemperature()==E::None); f.finish();
-  CHECK(f.manager.getTemperatureResult().acquisition.error==E::AcquisitionFailed);
-  CHECK(f.manager.getTemperatureResult().conversion.error==Pt100::Error::NotAttempted);
-  CHECK(!f.manager.getTemperatureResult().valid);
-  f.wire.dftTimeout=false; CHECK(f.manager.recover());
-  f.wire.mask=0x09; f.wire.muxMismatch=true; CHECK(f.manager.startTemperature()==E::AcquisitionFailed); f.finish();
-  CHECK(!f.manager.getTemperatureResult().valid);
-  CHECK(f.manager.getTemperatureResult().acquisition.hardwareError!=ImpedanceDiagnostics::ErrorCode::None);
-  f.wire.muxMismatch=false; CHECK(f.manager.recover());
-  CHECK(f.manager.startTemperature()==E::None); f.finish();
-  auto saved=f.manager.getTemperatureResult(); CHECK(saved.valid);
-  f.calibrate(P::CalHigh100R);
-  CHECK(f.manager.getTemperatureResult().acquisition.calibrationId==saved.acquisition.calibrationId);
-  CHECK(f.manager.getTemperatureResult().acquisition.gainFactor==saved.acquisition.gainFactor);
-  unsigned transactions=f.wire.transactions;
-  f.command("cn0349 temperature help"); f.command("cn0349 temperature status"); f.command("cn0349 temperature result");
-  CHECK(transactions==f.wire.transactions);
-  CHECK(f.serial.output.find("EXPERIMENTAL / NOT ABSOLUTELY CALIBRATED")!=std::string::npos);
-  // Defense against inconsistent acquisition flags: never convert on upstream failure.
-  auto bad=saved.acquisition; bad.valid=false; CHECK(!convertPt100Acquisition(bad).valid);
-  bad=saved.acquisition; bad.state=S::Failed; CHECK(!convertPt100Acquisition(bad).valid);
-  bad=saved.acquisition; bad.error=E::InvalidCalibration; CHECK(!convertPt100Acquisition(bad).valid);
-  bad=saved.acquisition; bad.hardwareError=ImpedanceDiagnostics::ErrorCode::I2cNack;
-  CHECK(!convertPt100Acquisition(bad).valid);
-}
+
 void startupTests() {
-  Fixture f;
-  f.wire.regs[0x80]=0;  // Recovery must restore a usable profile before calibration.
-  CHECK(f.manager.prepareMeasurements());
-  CHECK(f.manager.isCalibrationRunning() && f.manager.isBusy());
-  CHECK(!f.manager.prepareMeasurements());
-  CHECK(f.manager.startTemperature()==E::Busy);
-  CHECK(f.serial.output.find("Sistema preparado para medir.")==std::string::npos);
-  f.finish();
-  CHECK(f.manager.calibrationState()==CN0349CalibrationState::Complete);
-  for(int i=0;i<4;++i) {
-    CN0349Calibration c; CHECK(f.manager.getCalibration(static_cast<P>(i),c));
-    CHECK(c.valid && c.sampleCount==5 && c.frequencyHz==2000);
-    CHECK(c.calibrationId==static_cast<unsigned>(i+1));
+  Fixture f; CHECK(f.manager.getStatus().state==InstrumentState::NotInitialized);
+  CHECK(f.manager.startSingleMeasurement()==E::Hardware); f.begin();
+  CHECK(f.manager.getStatus().state==InstrumentState::Calibrating);
+  CHECK(f.manager.startSingleMeasurement()==E::Busy);
+  CHECK(f.manager.setMeasurementSensors(S::Ec)==E::Busy);
+  CHECK(f.manager.runCalibration()==E::Busy);
+  f.finish(); f.standby(); CHECK(f.manager.getStatus().calibrationRunId==1);
+  CHECK(f.manager.getSetup().sensors==S::Both && f.manager.getSetup().intervalMs==1000);
+  CHECK(f.manager.getSetup().ecCalibration==P::CalLow10K);
+  for(uint8_t i=0;i<4;++i) {
+    CN0349Calibration c; CHECK(f.manager.getCalibrationStatus(static_cast<P>(i),c));
+    CHECK(c.valid && c.compatibleWithCurrentConfig && c.sampleCount==5 && c.calibrationId==i+1);
+    CHECK(c.frequencyHz==2000 && c.mclkHz==1000000 && c.excitationRange==1 && c.pgaGain==1 && c.settlingCycles==10);
+    CHECK(fabs(c.gainFactorPerOhm - 1/(c.meanMagnitude*c.rcalOhms))<1e-9);
   }
-  CHECK(f.serial.output.find("Sistema preparado para medir.")!=std::string::npos);
-  CHECK(f.manager.impedanceCalibration()==P::CalHigh100R);
-  CHECK(f.manager.startTemperature()==E::None); f.finish(); CHECK(f.manager.getTemperatureResult().valid);
-  Fixture cancelled; CHECK(cancelled.manager.prepareMeasurements());
-  CHECK(cancelled.manager.cancelCalibration()); cancelled.finish();
-  CHECK(cancelled.manager.calibrationState()==CN0349CalibrationState::Cancelled);
-  CHECK(cancelled.serial.output.find("Sistema preparado para medir.")==std::string::npos);
-  Fixture failed; CHECK(failed.manager.prepareMeasurements()); failed.wire.dftTimeout=true; failed.finish();
-  CHECK(failed.manager.calibrationState()==CN0349CalibrationState::Failed);
-  CHECK(failed.serial.output.find("Sistema preparado para medir.")==std::string::npos);
-  Fixture recovery; recovery.wire.regs[0x80]=0x21; recovery.wire.standbyFailure=true;
-  CHECK(!recovery.manager.prepareMeasurements());
-  CHECK(recovery.manager.calibrationState()==CN0349CalibrationState::Idle);
-  CHECK(!recovery.manager.isCalibrationRunning());
-  CHECK(recovery.serial.output.find("Sistema preparado para medir.")==std::string::npos);
-  Fixture manual; manual.command("cn0349 cal run all"); manual.finish();
-  for(int i=0;i<4;++i) { CN0349Calibration c; CHECK(manual.manager.getCalibration(static_cast<P>(i),c)); }
+  CN0349Calibration invalid; CHECK(!f.manager.getCalibrationStatus(static_cast<P>(99),invalid));
+  Conductivity::AdCalibration ad; CHECK(f.manager.getAdCalibrationStatus(CN0349EcRange::Low,ad));
+  CHECK(ad.valid && fabs(ad.gainFactorSiemensPerCode-1e-7)<1e-15 && fabs(ad.systemOffsetCode)<1e-9);
+  CHECK(f.manager.getAdCalibrationStatus(CN0349EcRange::High,ad));
+  CHECK(ad.valid && fabs(ad.gainFactorSiemensPerCode-1e-5)<1e-13 && fabs(ad.systemOffsetCode)<1e-9);
+  f.terminal.update(); CHECK(f.serial.output=="ATLANTES CN0349\nCAL OK 4/4\nAD LOW OK\nAD HIGH OK\nREADY\n");
+  Fixture missing; missing.wire.adAbsent=true; CHECK(missing.manager.begin(true)==E::Hardware);
+  CHECK(!missing.manager.isBusy()); missing.terminal.begin(); CHECK(missing.serial.output=="ATLANTES CN0349\nERR HARDWARE\n");
+  Fixture running; running.ready(); CHECK(running.manager.startSingleMeasurement()==E::None);
+  for(int i=0;i<35;++i) running.tick();
+  Fixture reboot; reboot.wire=running.wire; reboot.ready(); reboot.standby();
+  CHECK(reboot.manager.getSetup().sensors==S::Both && reboot.manager.getSetup().intervalMs==1000);
+  CHECK(reboot.manager.getStatus().publishedCycles==0);
+  Fixture mux; mux.wire.muxAbsent=true; CHECK(mux.manager.begin(true)==E::Hardware);
+  Fixture bus; CHECK(bus.manager.begin(false)==E::Hardware);
 }
-void continuousTemperatureTests() {
-  Fixture f;
-  CHECK(f.manager.startContinuousTemperature()==E::InvalidCalibration);
-  CHECK(!f.manager.isContinuousTemperature());
-  f.calibrate(P::CalHigh100R);
-  // Use exact 1 ms ticks to verify start-to-start timing across millis rollover.
-  hostClock()=UINT32_MAX-500;
-  const uint32_t started=hostClock();
-  f.serial.output.clear();
-  f.command("cn0349 temperature continuous");
-  CHECK(f.manager.isContinuousTemperature()); CHECK(f.manager.isBusy());
-  CHECK(f.manager.startContinuousTemperature()==E::Busy);
-  CHECK(f.manager.selectImpedanceCalibration(P::CalHigh1K)==E::Busy);
-  for(int i=0;i<999;++i) { ++hostClock(); f.manager.update(); }
-  CHECK(static_cast<uint32_t>(hostClock()-started)==999);
-  CHECK(f.manager.getTemperatureResult().valid);
-  CHECK(f.serial.output.find("temperature: ")!=std::string::npos);
-  CHECK(f.serial.output.find("\xC2\xBA" "C\n")!=std::string::npos);
-  for(const char* verbose : {"ADG715 ya confirma", "Solicitado RTD", "Adquisicion DFT unica iniciada", "Single Measurement", "REAL", "Z_ohm", "Pt100 impedance:", "finalizado en standby"})
-    CHECK(f.serial.output.find(verbose)==std::string::npos);
-  CHECK(f.manager.getTemperatureResult().acquisition.state==S::Complete);
-  const unsigned beforeScan=f.wire.transactions;
-  f.command("i2c scan"); CHECK(f.wire.transactions==beforeScan);
-  ++hostClock(); f.manager.update();
-  CHECK(f.manager.getTemperatureResult().acquisition.state==S::Running);
-  f.serial.output.clear();
-  f.command("cn0349 temperature result");
-  CHECK(f.serial.output.find("REAL/IMAG:")!=std::string::npos);
-  f.command("cn0349 temperature stop"); f.finish();
-  CHECK(!f.manager.isContinuousTemperature());
-  CHECK(f.manager.getTemperatureResult().acquisition.state==S::Cancelled);
-  auto snapshot=f.manager.getTemperatureResult(); unsigned transactions=f.wire.transactions;
-  hostClock()+=5000; f.manager.update(); CHECK(transactions==f.wire.transactions);
-  CHECK(f.manager.getTemperatureResult().acquisition.state==snapshot.acquisition.state);
-  CHECK(f.manager.startContinuousTemperature()==E::None);
-  // Finish first sample without waiting for the continuous bus reservation.
-  for(int i=0;i<200 && f.manager.getTemperatureResult().acquisition.state==S::Running;++i) f.tick();
-  CHECK(f.manager.getTemperatureResult().valid);
-  CHECK(f.manager.cancelTemperature()); CHECK(!f.manager.isBusy());
-  CHECK(f.manager.getTemperatureResult().valid);  // stop in idle gap preserves sample
-  CHECK(f.manager.startContinuousTemperature()==E::None);
-  f.wire.dftTimeout=true;
-  f.finish(); CHECK(!f.manager.isContinuousTemperature()); CHECK(!f.manager.getTemperatureResult().valid);
-  CHECK(f.manager.getTemperatureResult().acquisition.error==E::AcquisitionFailed);
-  f.wire.dftTimeout=false; CHECK(f.manager.recover());
-  CHECK(f.manager.startContinuousTemperature()==E::None); CHECK(f.manager.cancel()); f.finish();
-  CHECK(!f.manager.isContinuousTemperature());
-  CHECK(f.manager.recover());
-  f.serial.output.clear();
-  CHECK(f.manager.startTemperature()==E::None); f.finish();
-  CHECK(f.serial.output.find("Single Measurement")!=std::string::npos);
+void calibrationTests() {
+  Fixture f; f.wire.zeroDftMask=0x09; f.begin(); f.finish();
+  CHECK(f.manager.getStatus().validCalibrations==3); f.standby();
+  CN0349Calibration c; CHECK(f.manager.getCalibrationStatus(P::CalHigh100R,c));
+  CHECK(!c.valid && c.error==E::MeasurementFailed && c.state==CalibrationState::Invalid);
+  CHECK(!f.manager.getStatus().adHighValid && f.manager.getStatus().adLowValid);
+  CHECK(f.manager.startSingleMeasurement()==E::NotCalibrated);
+  CHECK(f.manager.setMeasurementSensors(S::Ec)==E::None);
+  CHECK(f.manager.startSingleMeasurement()==E::None); f.finish(); CHECK(f.result().valid);
+  f.terminal.update(); CHECK(f.serial.output.find("CAL PARTIAL 3/4")!=std::string::npos);
+  f.wire.zeroDftMask=0xff; CHECK(f.manager.runCalibration()==E::None); f.finish();
+  CHECK(f.manager.getStatus().validCalibrations==4);
+  const auto oldId=c.calibrationId;
+  f.wire.timeoutMask=0x09; CHECK(f.manager.runCalibration()==E::None); f.finish();
+  f.manager.getCalibrationStatus(P::CalHigh100R,c);
+  CHECK(!c.valid && c.calibrationId>oldId && c.error==E::Timeout);
+  CHECK(f.manager.getStatus().validCalibrations==3); f.standby();
+  f.wire.timeoutMask=0xff; CHECK(f.manager.runCalibration()==E::None); f.finish();
+  CHECK(f.manager.getStatus().validCalibrations==4);
+  CHECK(f.manager.startContinuousMeasurement()==E::None); CHECK(f.manager.runCalibration()==E::None);
+  CHECK(!f.manager.getStatus().continuous); f.finish(); f.standby();
+  CHECK(f.manager.getStatus().validCalibrations==4 && !f.manager.getStatus().continuous);
+  const auto cycles=f.manager.getStatus().publishedCycles; for(int i=0;i<200;++i) f.tick();
+  CHECK(f.manager.getStatus().publishedCycles==cycles);
 }
-void ecTests() {
-  Fixture f;
-  using R=CN0349EcRange;
-  CHECK(f.manager.getEcResult().acquisition.state==S::Idle);
-  CHECK(f.manager.startEc()==E::InvalidCalibration);
-  CHECK(f.manager.selectEcCalibration(P::CalLow1K)==E::IncompatibleCalibration);
-  CHECK(f.manager.selectEcRange(static_cast<R>(99))==E::InvalidData);
-  CHECK(f.manager.selectEcRange(R::Low)==E::None);
-  CHECK(f.manager.startEc()==E::IncompatibleCalibration);
-  CHECK(f.manager.selectEcCalibration(P::CalLow1K)==E::None);
-  CHECK(f.manager.startEc()==E::InvalidCalibration);
-  CHECK(f.manager.selectEcCalibration(static_cast<P>(99))==E::InvalidCalibration);
-  for(int i=0;i<4;++i) f.calibrate(static_cast<P>(i));
-  CN0349EcResult first{};
-  for(R range : {R::High,R::Low}) {
-    CHECK(f.manager.selectEcRange(range)==E::None);
-    const P presets[2] = {range==R::High?P::CalHigh100R:P::CalLow1K,
-                          range==R::High?P::CalHigh1K:P::CalLow10K};
-    for(P preset : presets) {
-      CHECK(f.manager.selectEcCalibration(preset)==E::None);
-      CHECK(f.manager.startEc()==E::None);
-      const uint8_t expected=range==R::High?0x81:0x82;
-      CHECK(f.wire.mask==expected);
-      CHECK(f.manager.getStatus().activeOperation==CN0349Operation::Ec);
-      CHECK(f.manager.getStatus().state==CN0349State::RunningEc);
-      CHECK(f.manager.startEc()==E::Busy);
-      CHECK(f.manager.selectEcRange(range)==E::Busy);
-      CHECK(!f.manager.startSingle());
-      f.finish();
-      auto r=f.manager.getEcResult();
-      CHECK(r.acquisition.valid && r.acquisition.state==S::Complete);
-      CHECK(r.ad5934FinalState==ImpedanceApp::MeasurementState::Complete);
-      CHECK(r.standbyVerified && !r.saturationKnown);
-      CHECK(r.range==range && r.acquisition.measurementMask==expected);
-      CHECK(r.rfbOhms==(range==R::High?100:1000));
-      CHECK(r.acquisition.calibrationPreset==preset && r.acquisition.calibrationId>0);
-      CHECK(r.acquisition.real==600 && r.acquisition.imag==800 && r.acquisition.magnitude==1000);
-      CHECK(fabs(r.acquisition.apparentImpedanceOhms-(preset==P::CalHigh100R?100:preset==P::CalHigh1K?1000:preset==P::CalLow1K?1000:10000))<0.1f);
-      if(range==R::High && preset==P::CalHigh100R) first=r;
-      CHECK(f.wire.regs[0x80]==0xB1 && f.wire.regs[0x81]==8);
-    }
+void selectionAndCycleTests() {
+  for(S sensors : {S::Pt100,S::Ec,S::Both}) {
+    Fixture f; f.ready(); CHECK(f.manager.setMeasurementSensors(sensors)==E::None);
+    f.wire.routes.clear(); CHECK(f.manager.startSingleMeasurement()==E::None);
+    CHECK(f.manager.startSingleMeasurement()==E::Busy); f.finish(); f.standby();
+    auto r=f.result(); CHECK(r.valid && r.cycleId==1 && r.setup.sensors==sensors && r.finishedMs-r.startedMs>0);
+    if(sensors!=S::Ec) { CHECK(r.pt100.valid && r.pt100.acquisition.measurementMask==0x41);
+      CHECK(fabs(r.pt100.temperature.celsius)<0.001f); CHECK(r.pt100.acquisition.real==600 && r.pt100.acquisition.imag==800); }
+    if(sensors!=S::Pt100) { CHECK(r.ec.valid && r.ec.acquisition.measurementMask==0x82);
+      CHECK(fabs(r.ec.conductivity.microSiemensPerCm-100)<0.01f); }
+    if(sensors==S::Both) { CHECK(f.wire.routes.size()==2 && f.wire.routes[0]==0x41 && f.wire.routes[1]==0x82); }
+    CHECK(f.manager.takeMeasurementResult(r)); CHECK(!f.manager.takeMeasurementResult(r));
+    const auto preserved=r;
+    auto setup=f.manager.getSetup(); setup.nominalKPerCm=2; setup.ecRange=CN0349EcRange::High; setup.ecCalibration=P::CalHigh1K;
+    CHECK(f.manager.setSetup(setup)==E::None);
+    CHECK(f.manager.runCalibration()==E::None); f.finish();
+    r=f.result(); CHECK(r.cycleId==preserved.cycleId && r.ec.acquisition.gainFactor==preserved.ec.acquisition.gainFactor);
+    CHECK(r.setup.nominalKPerCm==1);
+    CHECK(f.manager.startSingleMeasurement()==E::None); f.finish();
+    r=f.result(); CHECK(r.cycleId==2); if(sensors!=S::Pt100) CHECK(r.ec.acquisition.measurementMask==0x81 && r.ec.acquisition.calibrationPreset==P::CalHigh1K);
   }
-  CHECK(f.manager.selectEcRange(R::High)==E::None);
-  CHECK(f.manager.getEcResult().range==R::Low);
-  CHECK(f.manager.getEcResult().acquisition.calibrationPreset==P::CalLow10K);
-  CHECK(f.manager.selectEcCalibration(P::CalHigh100R)==E::None);
-  CHECK(f.manager.getEcResult().acquisition.calibrationPreset==P::CalLow10K);
-  f.command("cn0349 ec range list"); f.command("cn0349 ec config");
-  f.command("cn0349 ec cal list"); f.command("cn0349 ec help");
-  f.command("cn0349 ec status"); f.command("cn0349 ec result");
-  CHECK(f.serial.output.find("EC PROBE - EXPERIMENTAL / NOT ABSOLUTELY CALIBRATED")!=std::string::npos);
-  CHECK(f.serial.output.find("Saturation not reliably detectable")!=std::string::npos);
-  CHECK(f.serial.output.find("AD5934 final state/standby verified: COMPLETE / yes")!=std::string::npos);
-  f.command("cn0349 ec range set LOW"); CHECK(f.manager.ecRange()==R::Low);
-  f.command("cn0349 ec cal set CAL_HIGH_100R");
-  CHECK(f.manager.ecRequestError()==E::IncompatibleCalibration);
-  f.command("cn0349 ec cal set CAL_LOW_1K");
-  CHECK(f.manager.ecRequestError()==E::None && f.manager.ecCalibration()==P::CalLow1K);
-  f.command("cn0349 ec range set HIGH");
-  CHECK(f.manager.ecRange()==R::High);
-  CHECK(f.manager.selectEcCalibration(P::CalHigh100R)==E::None);
-  CHECK(f.manager.configureSingle({P::CalLow1K,3000,10})); CHECK(f.manager.startEc()==E::InvalidFrequency);
-  CHECK(f.manager.configureSingle({P::CalLow1K,2000,11})); CHECK(f.manager.startEc()==E::IncompatibleCalibration);
-  CHECK(f.manager.configureSingle({P::CalLow1K,2000,10}));
-  f.command("cn0349 ec start"); CHECK(f.manager.isEcRunning());
-  f.command("cn0349 ec stop"); f.finish();
-  CHECK(f.manager.getEcResult().acquisition.state==S::Cancelled);
-  CN0349EcResult saved; CHECK(f.manager.getLastValidEcResult(saved));
-  CHECK(saved.acquisition.calibrationPreset==P::CalLow10K);
-  f.wire.setDft(0,0); CHECK(f.manager.startEc()==E::None); f.finish();
-  CHECK(f.manager.getEcResult().acquisition.error==E::InvalidData);
-  CHECK(f.manager.getLastValidEcResult(saved));
-  f.wire.setDft(600,800); f.wire.dftTimeout=true;
-  CHECK(f.manager.startEc()==E::None); f.finish();
-  CHECK(f.manager.getEcResult().acquisition.state==S::Failed && !f.manager.getEcResult().acquisition.valid);
-  f.wire.dftTimeout=false; CHECK(f.manager.recover());
-  f.wire.mask=0x09; f.wire.muxMismatch=true;
-  CHECK(f.manager.startEc()==E::AcquisitionFailed); f.finish();
-  CHECK(!f.manager.getEcResult().acquisition.valid);
-  f.wire.muxMismatch=false; CHECK(f.manager.recover());
-  CHECK(f.manager.startEc()==E::None); f.finish(); CHECK(f.manager.getEcResult().acquisition.valid);
-  f.wire.regs[0x80]=0x21; f.wire.standbyFailure=true;
-  CHECK(f.manager.startEc()==E::AcquisitionFailed); f.finish();
-  CHECK(!f.manager.getEcResult().acquisition.valid && !f.manager.getEcResult().standbyVerified);
-  f.wire.standbyFailure=false; CHECK(f.manager.recover());
-  CHECK(f.manager.selectImpedanceCalibration(P::CalHigh100R)==E::None);
-  CHECK(f.manager.startTemperature()==E::None); f.finish();
-  auto temp=f.manager.getTemperatureResult(); CHECK(temp.valid);
-  CHECK(f.manager.startEc()==E::None); f.finish();
-  CHECK(f.manager.getTemperatureResult().acquisition.calibrationId==temp.acquisition.calibrationId);
-  CHECK(f.manager.getTemperatureResult().conversion.celsius==temp.conversion.celsius);
-  CHECK(f.manager.getImpedanceResult().measurementMask==0x41);
-  CHECK(first.acquisition.measurementMask==0x81);
-  unsigned transactions=f.wire.transactions;
-  f.command("cn0349 ec result"); f.command("cn0349 ec status");
-  CHECK(transactions==f.wire.transactions);
+  Fixture compatibility; compatibility.ready();
+  CHECK(compatibility.app.configureSingle(MuxApp::CalibrationPreset::CalHigh100R,2001,10));
+  CHECK(compatibility.manager.startSingleMeasurement()==E::NotCalibrated);
+  CHECK(compatibility.app.configureSingle(MuxApp::CalibrationPreset::CalHigh100R,2000,11));
+  CHECK(compatibility.manager.startSingleMeasurement()==E::NotCalibrated);
+  CHECK(compatibility.manager.runCalibration()==E::None); compatibility.finish();
+  CHECK(compatibility.manager.startSingleMeasurement()==E::None); compatibility.finish(); CHECK(compatibility.result().valid);
+  Fixture f; f.ready(); auto setup=f.manager.getSetup();
+  setup.sensors=static_cast<S>(0); CHECK(f.manager.setSetup(setup)==E::InvalidArgument);
+  setup=f.manager.getSetup(); setup.nominalKPerCm=NAN; CHECK(f.manager.setSetup(setup)==E::InvalidArgument);
+  setup=f.manager.getSetup(); setup.ecModel=Conductivity::Model::SeriesR2Experimental; CHECK(f.manager.setSetup(setup)==E::None);
+  setup=f.manager.getSetup(); setup.ecModel=static_cast<Conductivity::Model>(99); CHECK(f.manager.setSetup(setup)==E::InvalidArgument);
+  setup=f.manager.getSetup(); setup.ecCalibration=P::CalHigh100R; CHECK(f.manager.setSetup(setup)==E::InvalidArgument);
+}
+void analogDevicesIntegrationTests() {
+  Fixture f; f.ready(); auto setup=f.manager.getSetup(); setup.ecModel=Conductivity::Model::AnalogDevices;
+  setup.sensors=S::Both; CHECK(f.manager.setSetup(setup)==E::None);
+  CHECK(f.manager.startSingleMeasurement()==E::None); f.finish(); auto r=f.result();
+  CHECK(r.valid && r.pt100.valid && r.ec.valid && r.ec.conductivity.model==Conductivity::Model::AnalogDevices);
+  CHECK(r.ec.acquisition.apparentImpedanceOhms==0 && r.ec.conductivity.calibrationId!=0);
+  CHECK(fabs(r.ec.conductivity.measuredAdmittanceSiemens-0.0001)<1e-12);
+  CHECK(fabs(r.ec.conductivity.cellAdmittanceSiemens-0.000101010101)<1e-12);
+  CHECK(fabs(r.ec.conductivity.microSiemensPerCm-101.010101)<0.0001);
+  const auto first=r.ec.conductivity;
+  CHECK(f.manager.runCalibration()==E::None); f.finish();
+  r=f.result(); CHECK(r.ec.conductivity.calibrationId==first.calibrationId);
+  setup=f.manager.getSetup(); setup.sensors=S::Ec; setup.ecRange=CN0349EcRange::High;
+  setup.ecCalibration=P::CalHigh1K; setup.nominalKPerCm=2; CHECK(f.manager.setSetup(setup)==E::None);
+  f.wire.setDft(30,40); CHECK(f.manager.startSingleMeasurement()==E::None); f.finish(); r=f.result();
+  CHECK(r.valid && fabs(r.ec.conductivity.measuredAdmittanceSiemens-0.0005)<1e-12);
+  CHECK(fabs(r.ec.conductivity.microSiemensPerCm-1052.631578)<0.001);
+  CHECK(f.manager.startContinuousMeasurement()==E::None); f.cycle(); CHECK(f.result().valid);
+  CHECK(f.manager.stopMeasurement()==E::None); f.finish();
+  Fixture invalid; invalid.wire.zeroDftMask=0x12; invalid.begin(); invalid.finish();
+  setup=invalid.manager.getSetup(); setup.sensors=S::Ec; setup.ecModel=Conductivity::Model::AnalogDevices;
+  CHECK(invalid.manager.setSetup(setup)==E::None);
+  CHECK(invalid.manager.startSingleMeasurement()==E::NotCalibrated);
+}
+void continuousTests() {
+  for(S sensors : {S::Pt100,S::Ec,S::Both}) {
+    Fixture f; f.ready(); CHECK(f.manager.setMeasurementSensors(sensors)==E::None);
+    hostClock()=0xfffffff0UL; const uint32_t start=millis();
+    CHECK(f.manager.startContinuousMeasurement()==E::None); f.cycle();
+    CHECK(f.result().startedMs==start); CHECK(f.manager.setMeasurementSensors(S::Ec)==E::Busy);
+    CHECK(f.manager.setSetup(f.manager.getSetup())==E::Busy);
+    const auto n=f.manager.getStatus().publishedCycles;
+    hostClock()=start+999; f.manager.update(); CHECK(f.manager.getStatus().state==InstrumentState::Idle);
+    hostClock()=start+1000; f.manager.update(); CHECK(f.manager.getStatus().state==InstrumentState::Measuring);
+    CHECK(f.manager.getStatus().publishedCycles==n); f.cycle(); CHECK(f.result().startedMs==uint32_t(start+1000));
+    CHECK(f.manager.stopMeasurement()==E::None); f.finish(); f.standby();
+    const auto tx=f.wire.transactions; for(int i=0;i<500;++i) f.tick(); CHECK(f.wire.transactions==tx);
+  }
+  Fixture f; f.ready(); auto setup=f.manager.getSetup(); setup.intervalMs=1; CHECK(f.manager.setSetup(setup)==E::None);
+  CHECK(f.manager.startContinuousMeasurement()==E::None); f.cycle(); CHECK(f.result().intervalExceeded);
+  CHECK(f.manager.getStatus().intervalExceededCount==1); const auto finish=millis(); f.tick();
+  f.cycle(); CHECK(f.result().startedMs==finish+10); CHECK(f.manager.getStatus().overwrittenResults==1);
+  CHECK(f.manager.stopMeasurement()==E::None); f.finish();
+  // Sustained run exercises repeated transitions and result consumption.
+  Fixture longRun; longRun.ready(); setup=longRun.manager.getSetup(); setup.intervalMs=1;
+  CHECK(longRun.manager.setSetup(setup)==E::None); CHECK(longRun.manager.startContinuousMeasurement()==E::None);
+  for(int i=0;i<1000;++i) { longRun.cycle(); MeasurementCycle r; CHECK(longRun.manager.takeMeasurementResult(r)); CHECK(r.valid && r.cycleId==uint32_t(i+1)); }
+  CHECK(longRun.manager.getStatus().overwrittenResults==0); CHECK(longRun.manager.stopMeasurement()==E::None); longRun.finish();
+}
+void stopAndFailureTests() {
+  for(S selection : {S::Pt100,S::Ec}) {
+    Fixture f; f.ready(); CHECK(f.manager.setMeasurementSensors(selection)==E::None);
+    CHECK(f.manager.startContinuousMeasurement()==E::None); f.tick();
+    CHECK(f.manager.stopMeasurement()==E::None); f.finish(); f.standby();
+    const auto r=f.result(); CHECK(r.cancelled && !r.valid);
+    const auto sensor=selection==S::Pt100 ? r.pt100 : r.ec;
+    CHECK(sensor.acquisition.state==CN0349ImpedanceState::Cancelled && sensor.error==E::Cancelled);
+  }
+  for(uint8_t mask : {0x41,0x82}) {
+    Fixture f; f.ready(); CHECK(f.manager.startContinuousMeasurement()==E::None);
+    for(int i=0;i<200 && (f.wire.mask!=mask || f.app.measurementState()!=ImpedanceApp::MeasurementState::Acquiring);++i) f.tick();
+    CHECK(f.wire.mask==mask); CHECK(f.manager.stopMeasurement()==E::None);
+    f.finish(); f.standby(); CHECK(!f.result().valid && f.result().cancelled);
+    CHECK(f.manager.startSingleMeasurement()==E::None); f.finish(); CHECK(f.result().valid);
+  }
+  for(uint8_t mask : {0x41,0x82}) {
+    Fixture f; f.ready(); f.wire.timeoutMask=mask; CHECK(f.manager.startSingleMeasurement()==E::None); f.finish();
+    auto r=f.result(); CHECK(!r.valid && r.error==E::Timeout);
+    if(mask==0x41) CHECK(!r.pt100.valid && r.ec.valid); else CHECK(r.pt100.valid && !r.ec.valid);
+    f.standby(); f.wire.timeoutMask=0xff;
+    // Manual calibration recovers a failed final acquisition's degraded state.
+    CHECK(f.manager.runCalibration()==E::None); f.finish();
+    CHECK(f.manager.startSingleMeasurement()==E::None); f.finish(); CHECK(f.result().valid);
+  }
+  Fixture pending; pending.ready(); pending.command("measure start");
+  pending.command("cal run"); pending.wire.adAbsent=true;
+  pending.finish(); pending.serial.output.clear(); pending.terminal.update();
+  CHECK(pending.manager.getStatus().validCalibrations==0);
+  CHECK(pending.serial.output.find("ERR HARDWARE")!=std::string::npos);
+  Fixture zero; zero.ready(); zero.wire.zeroDftMask=0x82;
+  CHECK(zero.manager.startSingleMeasurement()==E::None); zero.finish();
+  CHECK(zero.result().pt100.valid && !zero.result().ec.valid && !zero.result().valid);
+  Fixture range; range.ready(); range.wire.setDft(6,8);
+  CHECK(range.manager.startSingleMeasurement()==E::None); range.finish();
+  CHECK(!range.result().pt100.valid && range.result().pt100.acquisition.valid && range.result().ec.valid);
+  Fixture mux; mux.ready(); mux.wire.muxMismatch=true;
+  CHECK(mux.manager.startSingleMeasurement()==E::None); mux.finish(); CHECK(!mux.result().valid); mux.standby();
+  Fixture standby; standby.ready(); CHECK(standby.manager.startSingleMeasurement()==E::None);
+  standby.wire.standbyFailure=true; standby.finish(); CHECK(!standby.result().valid && !standby.manager.getStatus().hardwareReady);
+  Fixture bus; bus.ready(); CHECK(bus.manager.startSingleMeasurement()==E::None); bus.wire.busError=true;
+  bus.finish(); CHECK(!bus.result().valid); bus.wire.busError=false;
+  CHECK(bus.manager.runCalibration()==E::None); bus.finish(); CHECK(bus.manager.getStatus().validCalibrations==4);
+}
+void terminalTests() {
+  Fixture f; f.ready(); f.serial.output.clear();
+  const auto tx=f.wire.transactions;
+  for(const auto command : {"help","status","setup show","cal status","cal show","measure show"}) f.command(command);
+  CHECK(f.wire.transactions==tx);
+  CHECK(f.serial.output.find("LEGACY HIGH_100R | GF ")!=std::string::npos);
+  CHECK(f.serial.output.find("AD LOW | NL ")!=std::string::npos);
+  CHECK(f.serial.output.find("S/code | NOS ")!=std::string::npos);
+  f.command("  MeAsUrE SET ec PT100  "); CHECK(f.manager.getSetup().sensors==S::Both);
+  for(const auto bad : {"measure set", "measure set ec ec", "measure set pt100 bad", "measure set ec pt100 ec", "setup sensor ec", "setup interval -1", "setup interval 0", "setup interval 2147483648", "setup interval 1x", "setup ec k nan", "setup ec k inf", "setup ec k 1x", "setup ec model invalid", "ad5934 measure start", "cn0349 temperature start"}) {
+    f.serial.output.clear(); f.command(bad); CHECK(f.serial.output=="ERR INVALID_ARGUMENT\n");
+  }
+  f.command("measure set EC"); CHECK(f.manager.getSetup().sensors==S::Ec);
+  f.command("measure set PT100 EC"); CHECK(f.manager.getSetup().sensors==S::Both);
+  f.command("measure set pt100"); CHECK(f.manager.getSetup().sensors==S::Pt100); f.command("measure once");
+  f.command("setup interval 2000"); CHECK(f.serial.output.find("ERR BUSY")!=std::string::npos);
+  f.command("status"); CHECK(f.manager.isBusy()); f.finish(); f.serial.output.clear(); f.terminal.update();
+  CHECK(f.serial.output.find("PT100 | ")!=std::string::npos && f.serial.output.find(" | OK")!=std::string::npos);
+  CHECK(f.serial.output.find("REAL")==std::string::npos && f.serial.output.find("DFT")==std::string::npos);
+  f.command("setup ec range high"); CHECK(f.manager.getSetup().ecCalibration==P::CalHigh100R);
+  f.command("setup ec k 2.5"); CHECK(f.manager.getSetup().nominalKPerCm==2.5);
+  f.command("measure set ec"); f.command("measure start"); f.command("measure stop");
+  f.finish(); f.terminal.update(); CHECK(f.serial.output.find("OK STOPPED")!=std::string::npos);
+  f.command("setup ec range low"); f.command("measure set pt100 ec"); f.wire.timeoutMask=0x82; f.command("measure once"); f.finish();
+  f.serial.output.clear(); f.terminal.update(); CHECK(f.serial.output.find("PT100 | ")!=std::string::npos);
+  CHECK(f.serial.output.find("EC | RAW | ERR TIMEOUT")!=std::string::npos && f.serial.output.find(" | OK")==std::string::npos);
+  f.serial.output.clear(); f.command(std::string(100,'a')); CHECK(f.serial.output=="ERR INVALID_ARGUMENT\n");
+  f.command("status"); CHECK(f.serial.output.find("CAL 4/4")!=std::string::npos);
+  f.wire.timeoutMask=0xff; f.command("cal run"); f.finish(); f.terminal.update();
+  CHECK(f.manager.getStatus().validCalibrations==4);
+  f.serial.output.clear(); f.serial.input="status\r\n"; f.terminal.update();
+  CHECK(f.serial.output.find("CAL 4/4")!=std::string::npos && f.serial.output.find("ERR")==std::string::npos);
 }
 int main() {
-  try { mathTests(); std::cout<<"math: PASS\n"; measurementTests(); std::cout<<"manager/terminal/regression: PASS\n"; failureTests(); std::cout<<"readback/standby failures: PASS\n"; temperatureTests(); std::cout<<"temperature/provenance/errors/terminal: PASS\n"; startupTests(); std::cout<<"startup/recovery/all-calibrations: PASS\n"; continuousTemperatureTests(); std::cout<<"continuous temperature/timing/stop/errors: PASS\n"; ecTests(); std::cout<<"EC routing/calibration/errors/RTD regression: PASS\n"; conductivityTests(); std::cout<<"conductivity RAW/model/snapshot/errors: PASS\n"; }
-  catch(const std::exception& e) { std::cerr<<"FAIL: "<<e.what()<<"\n"; return 1; }
+  try {
+    mathTests(); std::cout<<"math PASS\n";
+    startupTests(); std::cout<<"startup PASS\n";
+    calibrationTests(); std::cout<<"calibration PASS\n";
+    selectionAndCycleTests(); std::cout<<"selection/cycles PASS\n";
+    analogDevicesIntegrationTests(); std::cout<<"analog devices PASS\n";
+    continuousTests(); std::cout<<"continuous/timing PASS\n";
+    stopAndFailureTests(); std::cout<<"stop/errors PASS\n";
+    terminalTests(); std::cout<<"terminal PASS\n";
+  } catch(const std::exception& e) { std::cerr<<e.what()<<"\n"; return 1; }
 }

@@ -1,10 +1,66 @@
 # ATLANTES CN-0349
 
+## 2026-10-28 — Hito 2G: método EC ANALOG_DEVICES
+
+Se incorpora CN-0349 Rev. A sin modificar RAW, SERIES ni Pt100. Las cuatro
+adquisiciones RCAL derivan AD LOW (10 kΩ/1 kΩ) y AD HIGH (1 kΩ/100 Ω), con
+NL/NH, YL/YH, GF, NOS, perfil, identificador, validez y error. La conversión
+implementa `YX=(NX-NOS)×GF`, `YCELL=YX/(1-R2×YX)` y `EC=YCELL×K` con `double`.
+Los snapshots congelan modelo, ruta, ID, NX, GF, NOS, YX, YCELL, denominador,
+K y unidades. Se añaden `setup ec model ad|analog_devices` y estado AD LOW/HIGH.
+`cal show` consulta los GF legacy y NL/NH/GF/NOS de ambos rangos AD sin iniciar
+adquisiciones ni modificar las calibraciones.
+
+Ocho grupos host PASS y firmware ESP32-S3 SUCCESS (23 840 bytes RAM, 380 570
+bytes flash). La [validación física](test/hito2g.md) está preparada pero no
+ejecutada; no se afirma exactitud metrológica ni se implementan BLE,
+compensación térmica o calibración de K.
+
 Firmware Arduino/PlatformIO para ESP32-S3 y la placa original EVAL-CN0349-PMDZ.
 Este archivo es el diario acumulativo: añadir nuevas entradas sin sustituir el
 historial de los hitos anteriores.
 
-## Estado actual — Hito 2A, firmware 0.7.0
+## Estado actual — 2026-10-27, Hito 2F, firmware 1.0.0
+
+Objetivo: convertir el firmware en un instrumento compacto con SETUP,
+CALIBRATION y MEASURE, listo para una futura Web BLE. Se auditó primero la
+estructura, dependencias y tests: [auditoría y plan](docs/hito2f-audit.md).
+
+Cambios realizados:
+
+- CN0349Manager simplificado como controlador central sin Serial/Terminal;
+  API de setup, calibración, selección, once, continuo, stop y resultados.
+- Arranque automático de los cuatro presets con cinco muestras, GF/fase y
+  estado/error por slot; invalidación de valores anteriores y calibración
+  parcial. Calibración manual compartida, sin reanudar continuo.
+- Un único motor DFT conservado, secuencia Pt100 → standby → EC, ciclos con
+  ID/tiempos/setup/metadatos completos y errores independientes por sensor.
+- Intervalos entre inicios reales con millis y sin backlog; parada asíncrona
+  segura incluso durante configuración. Snapshot cancelado siempre inválido.
+- Terminal operativo compacto y único. Se retiran parsers experimentales,
+  barridos, volcados, escáner y programador exclusivo de temperatura. Se
+  conservan drivers, interlocks, readbacks, errores y conversiones existentes.
+- Documentación global y por módulo actualizada. Contrato de consumo con
+  reconocimiento y contador de sobrescritura para la futura distribución BLE.
+
+Pruebas ejecutadas: suite host MSVC con 7 grupos PASS, incluidos 1000 ciclos
+simulados; Unity Pt100 3/3 y AD5934 11/11 PASS. Se probaron ausencia de hardware,
+calibración parcial, las tres selecciones, secuencia, stop durante ambos
+sensores/configuración, busy, metadatos, timeout, I²C/readback/standby, DFT cero,
+conversiones, recuperación, wrap de millis, intervalos excedidos y terminal.
+MSVC mantiene el warning C4018 preexistente del driver AD5934, sin modificarlo.
+Compilación PlatformIO ESP32-S3 N32R8V SUCCESS; tamaños finales registrados en
+[validación 2F](test/hito2f.md). No se afirma ejecución PlatformIO native: las
+pruebas host se ejecutaron con MSVC.
+
+Estado y pendientes: implementación y pruebas software realizadas; no se ha
+cargado este firmware ni probado físicamente. El Hito 2F requiere validar
+calibración, Pt100 y EC reales antes del Hito 3. RAW sigue siendo estimación
+con K nominal, sin compensación térmica ni soluciones patrón; modelo serie
+rechazado hasta verificar topología. No se implementan BLE, NVS ni autorange.
+[Arquitectura/API y comandos vigentes](docs/architecture.md).
+
+## Historial — Hito 2A, firmware 0.7.0
 
 CN0349Manager expone API C++ y comandos `cn0349` encima de la única máquina
 ImpedanceApp. Compilación PlatformIO ESP32-S3 correcta; validación física 0.7.0
