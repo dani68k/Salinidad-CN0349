@@ -15,6 +15,11 @@ formatear respuestas compactas. Constructor `Terminal(Stream&, CN0349Manager&)`;
 `begin` imprime cabecera; `update` procesa entrada y publica cambios/resultados.
 No conoce Wire, drivers ni detalles de secuenciación de sensores.
 
+`setup compensation on|off` activa o desactiva la compensación, y
+`setup alpha <valor>` establece el coeficiente en %/°C. El controlador valida
+el valor y exige PT100 + EC cuando está activa. `setup show` muestra ambos;
+cada ciclo muestra EC25 en µS/cm o `unavailable` si está activa y no es válida.
+
 Buffer fijo de 96 bytes y presupuesto 32 bytes/update, CRLF, tabuladores,
 backspace y normalización de mayúsculas/espacios. Líneas desbordadas o con
 caracteres no ASCII se descartan completas y generan ERR INVALID_ARGUMENT.

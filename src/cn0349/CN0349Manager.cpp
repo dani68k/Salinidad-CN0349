@@ -84,7 +84,10 @@ bool CN0349Manager::validSetup(const InstrumentSetup& setup) {
       (setup.ecRange == CN0349EcRange::High || setup.ecRange == CN0349EcRange::Low) &&
       preset < 4 && (setup.ecRange == CN0349EcRange::High ? preset < 2 : preset >= 2) &&
       (setup.ecModel == Conductivity::Model::Raw || setup.ecModel == Conductivity::Model::SeriesR2Experimental ||
-       setup.ecModel == Conductivity::Model::AnalogDevices) && isfinite(setup.nominalKPerCm) && setup.nominalKPerCm > 0;
+       setup.ecModel == Conductivity::Model::AnalogDevices) && isfinite(setup.nominalKPerCm) && setup.nominalKPerCm > 0 &&
+      isfinite(setup.temperatureAlpha) && setup.temperatureAlpha >= 0 && setup.temperatureAlpha <= 5 &&
+      fabsf(setup.temperatureAlpha * 100.0f - roundf(setup.temperatureAlpha * 100.0f)) < 0.001f &&
+      (!setup.temperatureCompensation || setup.sensors == MeasurementSensors::Both);
 }
 
 void CN0349Manager::loadSetup() {
@@ -92,10 +95,10 @@ void CN0349Manager::loadSetup() {
   if (!preferences.begin("cn0349", true)) return;
   uint8_t blob[20]{};
   const size_t length = preferences.getBytesLength("setup");
-  const bool read = (length == 12 || length == sizeof(blob)) &&
+  const bool read = (length == 12 || length == 17 || length == sizeof(blob)) &&
       preferences.getBytes("setup", blob, length) == length;
   preferences.end();
-  if (!read || !((blob[0] == 1 && length == 12) || (blob[0] == 2 && length == sizeof(blob))) ||
+  if (!read || !((blob[0] == 1 && length == 12) || (blob[0] == 2 && length == sizeof(blob)) || (blob[0] == 3 && length == 17)) ||
       blob[1] < 1 || blob[1] > 3 || blob[2] > 1 || blob[3] > 2) return;
   InstrumentSetup candidate = setup_;
   candidate.sensors = static_cast<MeasurementSensors>(blob[1]);
@@ -106,17 +109,24 @@ void CN0349Manager::loadSetup() {
       (static_cast<uint32_t>(blob[6]) << 16) | (static_cast<uint32_t>(blob[7]) << 24);
   static_assert(sizeof(float) == 4, "Setup NVS requires float32");
   memcpy(&candidate.nominalKPerCm, blob + 8, sizeof(float));
+  if (blob[0] == 3) {
+    if (blob[12] > 1) return;
+    candidate.temperatureCompensation = blob[12] != 0;
+    memcpy(&candidate.temperatureAlpha, blob + 13, sizeof(float));
+  }
   if (validSetup(candidate)) setup_ = candidate;
 }
 
 bool CN0349Manager::saveSetup() const {
-  uint8_t blob[12]{};
-  blob[0] = 1;
+  uint8_t blob[17]{};
+  blob[0] = 3;
   blob[1] = static_cast<uint8_t>(setup_.sensors);
   blob[2] = setup_.ecRange == CN0349EcRange::High ? 1 : 0;
   blob[3] = static_cast<uint8_t>(setup_.ecModel);
   for (size_t i = 0; i < 4; ++i) blob[4 + i] = static_cast<uint8_t>(setup_.intervalMs >> (8 * i));
   memcpy(blob + 8, &setup_.nominalKPerCm, sizeof(float));
+  blob[12] = setup_.temperatureCompensation ? 1 : 0;
+  memcpy(blob + 13, &setup_.temperatureAlpha, sizeof(float));
   Preferences preferences;
   if (!preferences.begin("cn0349", false)) return false;
   const bool written = preferences.putBytes("setup", blob, sizeof(blob)) == sizeof(blob);
@@ -128,7 +138,8 @@ InstrumentError CN0349Manager::setSetup(const InstrumentSetup& setup) {
   if (isBusy()) return InstrumentError::Busy;
   if (!validSetup(setup)) return InstrumentError::InvalidArgument;
   const bool changed = setup.sensors != setup_.sensors || setup.intervalMs != setup_.intervalMs ||
-      setup.ecRange != setup_.ecRange || setup.ecModel != setup_.ecModel || setup.nominalKPerCm != setup_.nominalKPerCm;
+      setup.ecRange != setup_.ecRange || setup.ecModel != setup_.ecModel || setup.nominalKPerCm != setup_.nominalKPerCm ||
+      setup.temperatureCompensation != setup_.temperatureCompensation || setup.temperatureAlpha != setup_.temperatureAlpha;
   setup_ = setup;
   if (changed) setupPersistenceFailed_ = !saveSetup();
   return setupPersistenceFailed_ ? InstrumentError::Persistence : InstrumentError::None;
@@ -360,6 +371,17 @@ void CN0349Manager::finishCycle(bool cancelled) {
   if (!cancelled) {
     if (selected(cycle_.setup.sensors, MeasurementSensors::Pt100) && !cycle_.pt100.valid) cycle_.error = cycle_.pt100.error;
     if (selected(cycle_.setup.sensors, MeasurementSensors::Ec) && !cycle_.ec.valid) cycle_.error = cycle_.ec.error;
+  }
+  if (!cancelled && cycle_.setup.temperatureCompensation && cycle_.pt100.valid && cycle_.ec.valid) {
+    const double ec = cycle_.ec.conductivity.microSiemensPerCm;
+    const double temperature = cycle_.pt100.temperature.celsius;
+    const double denominator = 1.0 + (cycle_.setup.temperatureAlpha / 100.0) * (temperature - 25.0);
+    if (isfinite(ec) && isfinite(temperature) && isfinite(denominator) && denominator > 0) {
+      const double ec25 = ec / denominator;
+      if (isfinite(ec25) && ec25 >= 0 && ec25 <= 3.402823466e38) {
+        cycle_.ec25MicroSiemens = static_cast<float>(ec25); cycle_.ec25Valid = true;
+      }
+    }
   }
   cycle_.valid = cycle_.error == InstrumentError::None;
   cycle_.intervalExceeded = continuous_ && (cycle_.finishedMs - cycle_.startedMs > cycle_.setup.intervalMs);

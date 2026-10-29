@@ -163,6 +163,7 @@ void Terminal::execute() {
     serial_.println("help | status");
     serial_.println("setup show | setup interval <ms>");
     serial_.println("setup ec range high|low | setup ec model raw|series|ad | setup ec k <K>");
+    serial_.println("setup compensation on|off | setup alpha <0..5>");
     serial_.println("cal status | cal show | cal run");
     serial_.println("measure show | measure set PT100|EC|PT100 EC | measure once|start|stop");
     return;
@@ -250,7 +251,12 @@ void Terminal::execute() {
   if (count >= 2 && !strcmp(args[0], "setup")) {
     auto setup = instrument_.getSetup();
     if (count == 2 && !strcmp(args[1], "show")) { printSetup(); return; }
-    if (count == 3 && !strcmp(args[1], "interval")) {
+    if (count == 3 && !strcmp(args[1], "compensation") && (!strcmp(args[2], "on") || !strcmp(args[2], "off"))) {
+      setup.temperatureCompensation = !strcmp(args[2], "on");
+    } else if (count == 3 && !strcmp(args[1], "alpha")) {
+      char* end = nullptr; errno = 0; setup.temperatureAlpha = strtof(args[2], &end);
+      if (errno || end == args[2] || *end) { reply(InstrumentError::InvalidArgument); return; }
+    } else if (count == 3 && !strcmp(args[1], "interval")) {
       if (!positiveInteger(args[2], setup.intervalMs)) { reply(InstrumentError::InvalidArgument); return; }
     } else if (count == 4 && !strcmp(args[1], "ec")) {
       if (!strcmp(args[2], "range") && (!strcmp(args[3], "high") || !strcmp(args[3], "low"))) {
@@ -279,6 +285,8 @@ void Terminal::printSetup() {
   serial_.print("EC RANGE "); serial_.println(s.ecRange == CN0349EcRange::High ? "HIGH" : "LOW");
   serial_.print("EC MODEL "); serial_.println(modelName(s.ecModel));
   serial_.print("EC K "); serial_.print(s.nominalKPerCm, 3); serial_.println(" cm-1");
+  serial_.print("EC COMPENSATION "); serial_.print(s.temperatureCompensation ? "ON" : "OFF");
+  serial_.print(" | ALPHA "); serial_.print(s.temperatureAlpha, 2); serial_.println(" %/C");
 }
 void Terminal::printCycle(const MeasurementCycle& c) {
   const bool pt = c.setup.sensors != MeasurementSensors::Ec, ec = c.setup.sensors != MeasurementSensors::Pt100;
@@ -299,6 +307,11 @@ void Terminal::printCycle(const MeasurementCycle& c) {
       serial_.print(c.ec.conductivity.error != Conductivity::Error::NotRun ?
           conductivityErrorName(c.ec.conductivity.error) : errorName(c.ec.error));
     }
+  }
+  if (c.setup.temperatureCompensation) {
+    serial_.print(" | EC25 ");
+    if (c.ec25Valid) { serial_.print(c.ec25MicroSiemens, 1); serial_.print(" uS/cm"); }
+    else serial_.print("unavailable");
   }
   if (c.valid) serial_.print(" | OK");
   serial_.println();

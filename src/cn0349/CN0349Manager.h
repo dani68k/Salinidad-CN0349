@@ -82,6 +82,8 @@ struct InstrumentSetup {
   CN0349Preset ecCalibration = CN0349Preset::CalLow10K;
   Conductivity::Model ecModel = Conductivity::Model::Raw;
   float nominalKPerCm = 1.0f;
+  bool temperatureCompensation = false;
+  float temperatureAlpha = 2.0f;
 };
 struct SensorMeasurement {
   MeasurementSensors sensor = MeasurementSensors::Pt100;
@@ -100,6 +102,8 @@ struct MeasurementCycle {
   bool valid = false;
   bool cancelled = false;
   bool intervalExceeded = false;
+  bool ec25Valid = false;
+  float ec25MicroSiemens = 0;
   InstrumentError error = InstrumentError::None;
 };
 struct InstrumentStatus {

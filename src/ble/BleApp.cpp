@@ -58,6 +58,13 @@ void BleApp::begin() {
   NimBLECharacteristic* commandCharacteristic = service->createCharacteristic(
       AtlantesBle::SETUP_COMMAND_UUID, NIMBLE_PROPERTY::WRITE,
       AtlantesBle::SETUP_COMMAND_SIZE);
+  setupExtCharacteristic_ = service->createCharacteristic(
+      AtlantesBle::SETUP_EXT_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
+      AtlantesBle::SETUP_EXT_SIZE);
+  NimBLECharacteristic* setupExtCommand = service->createCharacteristic(
+      AtlantesBle::SETUP_EXT_COMMAND_UUID, NIMBLE_PROPERTY::WRITE, AtlantesBle::SETUP_EXT_COMMAND_SIZE);
+  ec25Characteristic_ = service->createCharacteristic(
+      AtlantesBle::EC25_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY, AtlantesBle::EC25_SIZE);
   setupResultCharacteristic_ = service->createCharacteristic(
       AtlantesBle::SETUP_RESULT_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
       AtlantesBle::SETUP_RESULT_SIZE);
@@ -79,11 +86,12 @@ void BleApp::begin() {
   advancedCharacteristic_ = service->createCharacteristic(
       AtlantesBle::ADVANCED_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
       AtlantesBle::ADVANCED_SIZE);
-  initialized_ = advancedCharacteristic_ && statusCharacteristic_ && setupCharacteristic_ && commandCharacteristic &&
+  initialized_ = setupExtCommand && setupExtCharacteristic_ && ec25Characteristic_ && advancedCharacteristic_ && statusCharacteristic_ && setupCharacteristic_ && commandCharacteristic &&
       setupResultCharacteristic_ && calibrationCharacteristic_ && measurementCharacteristic_ && ecDiagnosticCharacteristic_ &&
       controlCommandCharacteristic && controlResultCharacteristic_;
   if (!initialized_) return;
   commandCharacteristic->setCallbacks(&commandCallbacks_);
+  setupExtCommand->setCallbacks(&commandCallbacks_);
   controlCommandCharacteristic->setCallbacks(&controlCallbacks_);
 
   publishAdvanced();
@@ -99,6 +107,8 @@ void BleApp::begin() {
   emptyDiagnostic[0] = AtlantesBle::PROTOCOL_VERSION;
   emptyDiagnostic[6] = 0xff;
   ecDiagnosticCharacteristic_->setValue(emptyDiagnostic, sizeof(emptyDiagnostic));
+  uint8_t emptyEc25[AtlantesBle::EC25_SIZE]{}; emptyEc25[0] = AtlantesBle::PROTOCOL_VERSION;
+  ec25Characteristic_->setValue(emptyEc25, sizeof(emptyEc25));
   service->start();
   NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
   advertising->setName(AtlantesBle::DEVICE_NAME);
@@ -190,13 +200,23 @@ bool BleApp::decodeSetup(const uint8_t* input, InstrumentSetup& setup) {
 }
 
 void BleApp::publishSetup(bool forceNotify) {
+  const InstrumentSetup setup = instrument_.getSetup();
   uint8_t payload[AtlantesBle::SETUP_SIZE]{};
-  encodeSetup(instrument_.getSetup(), payload);
-  if (!forceNotify && hasLastSetup_ && memcmp(payload, lastSetup_, sizeof(payload)) == 0) return;
-  memcpy(lastSetup_, payload, sizeof(payload));
-  hasLastSetup_ = true;
-  setupCharacteristic_->setValue(payload, sizeof(payload));
-  if (connected_) setupCharacteristic_->notify();
+  encodeSetup(setup, payload);
+  if (forceNotify || !hasLastSetup_ || memcmp(payload, lastSetup_, sizeof(payload)) != 0) {
+    memcpy(lastSetup_, payload, sizeof(payload)); hasLastSetup_ = true;
+    setupCharacteristic_->setValue(payload, sizeof(payload));
+    if (connected_) setupCharacteristic_->notify();
+  }
+  uint8_t extended[AtlantesBle::SETUP_EXT_SIZE]{};
+  memcpy(extended, payload, sizeof(payload));
+  extended[12] = setup.temperatureCompensation ? 1 : 0;
+  memcpy(extended + 13, &setup.temperatureAlpha, sizeof(float));
+  if (forceNotify || !hasLastSetupExt_ || memcmp(extended, lastSetupExt_, sizeof(extended)) != 0) {
+    memcpy(lastSetupExt_, extended, sizeof(extended)); hasLastSetupExt_ = true;
+    setupExtCharacteristic_->setValue(extended, sizeof(extended));
+    if (connected_) setupExtCharacteristic_->notify();
+  }
 }
 
 void BleApp::publishSetupResult(uint8_t requestId, AtlantesBle::SetupResult result) {
@@ -288,6 +308,11 @@ void BleApp::publishMeasurement() {
       static_cast<uint8_t>(!ecSelected ? 0xff : cycle.setup.ecRange == CN0349EcRange::High ? 1 : 0)};
   ecDiagnosticCharacteristic_->setValue(diagnostic, sizeof(diagnostic));
   if (connected_) ecDiagnosticCharacteristic_->notify();
+  uint8_t ec25[AtlantesBle::EC25_SIZE] = {AtlantesBle::PROTOCOL_VERSION, payload[2], payload[3], payload[4], payload[5],
+      static_cast<uint8_t>(cycle.setup.temperatureCompensation), static_cast<uint8_t>(cycle.ec25Valid)};
+  memcpy(ec25 + 7, &cycle.ec25MicroSiemens, sizeof(float));
+  ec25Characteristic_->setValue(ec25, sizeof(ec25));
+  if (connected_) ec25Characteristic_->notify();
   measurementCharacteristic_->setValue(payload, sizeof(payload));
   if (connected_) measurementCharacteristic_->notify();
   lastPublishedCycle_ = status.publishedCycles;
@@ -417,7 +442,7 @@ void BleApp::enqueueSetupCommand(const uint8_t* data, size_t size) {
 
 void BleApp::processSetupCommand() {
   bool rejected = false, hasCommand = false;
-  uint8_t rejectedRequestId = 0, requestId = 0, command[AtlantesBle::SETUP_COMMAND_SIZE]{};
+  uint8_t rejectedRequestId = 0, requestId = 0, command[AtlantesBle::SETUP_EXT_COMMAND_SIZE]{};
   size_t size = 0;
   portENTER_CRITICAL(&commandMux_);
   if (rejectedPending_) {
@@ -426,13 +451,13 @@ void BleApp::processSetupCommand() {
   if (commandPending_) {
     hasCommand = true; size = commandSize_;
     if (size > 1) requestId = command_[1];
-    if (size == sizeof(command)) memcpy(command, command_, sizeof(command));
+    if (size == AtlantesBle::SETUP_COMMAND_SIZE || size == sizeof(command)) memcpy(command, command_, size);
     commandPending_ = false;
   }
   portEXIT_CRITICAL(&commandMux_);
   if (rejected) publishSetupResult(rejectedRequestId, AtlantesBle::SetupResult::Busy);
   if (!hasCommand) return;
-  if (size != AtlantesBle::SETUP_COMMAND_SIZE) {
+  if (size != AtlantesBle::SETUP_COMMAND_SIZE && size != AtlantesBle::SETUP_EXT_COMMAND_SIZE) {
     publishSetupResult(requestId, AtlantesBle::SetupResult::InvalidLength); return;
   }
   if (command[0] != AtlantesBle::PROTOCOL_VERSION) {
@@ -451,6 +476,11 @@ void BleApp::processSetupCommand() {
   memcpy(setupPayload + 1, command + 2, AtlantesBle::SETUP_SIZE - 1);
   if (!decodeSetup(setupPayload, setup)) {
     publishSetupResult(requestId, AtlantesBle::SetupResult::InvalidValue); return;
+  }
+  if (size == AtlantesBle::SETUP_EXT_COMMAND_SIZE) {
+    if (command[13] > 1) { publishSetupResult(requestId, AtlantesBle::SetupResult::InvalidValue); return; }
+    setup.temperatureCompensation = command[13] != 0;
+    memcpy(&setup.temperatureAlpha, command + 14, sizeof(float));
   }
   const InstrumentError error = instrument_.setSetup(setup);
   if (error == InstrumentError::None) {

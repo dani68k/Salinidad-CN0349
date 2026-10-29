@@ -5,8 +5,7 @@
 `buildAdCalibrations` crea LOW/HIGH al terminar los cuatro slots existentes.
 La API añade `getAdCalibrationStatus`; preflight exige AD solo para ese modelo.
 RAW/SERIES conservan impedancia legacy y AD procesa magnitud DFT directa. Cada
-ciclo congela setup, ruta, ID y coeficientes. Sin autorange, compensación a
-25 °C, NVS ni BLE.
+ciclo congela setup, ruta, ID y coeficientes. Sin autorange.
 
 Hito 2F, 2026-10-27. Propósito: coordinar setup, calibración electrónica y ciclos
 Pt100/EC usando la adquisición existente, sin dependencia de Serial/Terminal.
@@ -41,6 +40,19 @@ se retiraron. Las fórmulas de conversión siguen en sus módulos puros.
 
 `getImpedanceProfile()` devuelve una copia del perfil configurado de adquisicion
 AD5934; no lee registros ni confirma el estado actual del hardware.
+
+`InstrumentSetup` incluye `temperatureCompensation` (por defecto OFF) y
+`temperatureAlpha` (por defecto 2,00 %/°C). `setSetup()` valida alpha entre
+0,00 y 5,00 con dos decimales y exige ambos sensores si la compensación está
+activa. `loadSetup()` valida el blob versionado de Preferences y acepta las
+versiones anteriores; `saveSetup()` guarda la versión 3 solo tras cambios
+efectivos. Si falla la escritura, se mantiene el setup en RAM y se devuelve
+`InstrumentError::Persistence`.
+
+Al terminar cada ciclo, si ambos sensores son válidos y la compensación está
+activa, se calcula `EC25 = EC / (1 + alpha / 100 * (T - 25))` con los valores
+del mismo ciclo. `ec25Valid` indica disponibilidad: entradas no finitas,
+denominador no positivo o resultado no representable no producen EC25 válido.
 
 `SensorMeasurement::ecRangeDiagnostic` clasifica la magnitud DFT EC frente a
 las dos referencias compatibles del rango activo: `InvalidCal` si no hay un

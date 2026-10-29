@@ -65,6 +65,7 @@
             <article class="result-card">
               <p id="ec-title" class="eyebrow">Conductivity with RAW</p>
               <p id="ec-result" class="reading-value">—</p>
+              <p id="ec25-result" class="ec25-result" hidden>EC25: —</p>
               <p id="ec-range-recommendation" class="ec-range-recommendation" hidden></p>
             </article>
           </div>
@@ -78,6 +79,7 @@
           <div class="chart-legend" aria-hidden="true">
             <span><i class="legend-temperature"></i>Temperature (°C)</span>
             <span><i class="legend-conductivity"></i>Conductivity (<span id="chart-ec-unit">µS/cm</span>)</span>
+            <span id="ec25-legend" hidden><i class="legend-ec25"></i>EC25</span>
           </div>
         </section>
         <fieldset class="chart-scale-controls">
@@ -106,11 +108,19 @@
               <label for="model">EC model<select id="model"><option value="0">RAW</option><option value="1">SERIES</option><option value="2">AD</option></select></label>
               <label for="cell-k">Cell constant<div class="input-with-unit"><input id="cell-k" type="number" min="0.000001" step="any" required><span class="input-unit">cm⁻¹</span></div></label>
               <label for="sensors">Sensors<select id="sensors"><option value="1">PT100</option><option value="2">EC</option><option value="3">PT100 + EC</option></select></label>
-              <div class="sensor-action"><span class="field-label">Active sensors</span><button id="set-sensors" type="button" class="button secondary">SET SENSORS</button></div>
+            </div>
+            <div class="temperature-compensation">
+              <p class="eyebrow">TEMPERATURE COMPENSATION</p>
+              <div class="setup-grid">
+                <label for="temperature-compensation">Enable EC temperature compensation<select id="temperature-compensation"><option value="0">OFF</option><option value="1">ON</option></select></label>
+                <label for="reference-temperature">Reference temperature (°C)<input id="reference-temperature" type="number" value="25.0" readonly></label>
+                <label for="temperature-alpha">Temperature coefficient (%/°C)<input id="temperature-alpha" type="number" min="0" max="5" step="0.01" value="2.00" required></label>
+              </div>
+              <p id="compensation-sensor-warning" class="compensation-warning" role="status" hidden>Temperature compensation requires PT100 + EC. Select both sensors or turn compensation OFF.</p>
             </div>
             <div class="setup-footer">
               <p class="hint">Changes are applied after device confirmation.</p>
-              <div class="button-row"><button id="cancel" type="button" class="button secondary">CANCEL</button><button id="apply" type="submit" class="button primary">APPLY CONFIGURATION</button></div>
+              <div class="button-row"><button id="cancel" type="button" class="button secondary">CANCEL</button><button id="apply" type="submit" class="button primary">APPLY</button></div>
             </div>
           </form>
         </section>

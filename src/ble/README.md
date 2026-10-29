@@ -118,3 +118,16 @@ y conserva intacto MEASUREMENT. Sus 7 bytes little-endian son `version:u8`,
 1 InRange, 2 NearLimit, 3 BelowRange y 4 AboveRange. Rango: 0 LOW, 1 HIGH,
 255 EC no seleccionado. El diagnóstico se publica con el mismo ciclo que la
 medición; una medida EC inválida se transmite como InvalidCal.
+
+## Compensación de temperatura
+
+SETUP_EXT `8d7b000c-6f7a-4f31-9c4d-2b6e6a7f3a10` es READ + NOTIFY y
+contiene los 12 bytes de SETUP seguidos de `enabled:u8` y `alpha:f32`.
+SETUP_EXT_COMMAND `8d7b000e-6f7a-4f31-9c4d-2b6e6a7f3a10` es WRITE y
+contiene los 13 bytes de SETUP_COMMAND seguidos de esos mismos campos. Utiliza
+SETUP_RESULT y el mismo proceso de validación y aplicación del controlador.
+
+EC25 `8d7b000d-6f7a-4f31-9c4d-2b6e6a7f3a10` es READ + NOTIFY: `version:u8`,
+`cycleId:u32`, `enabled:u8`, `valid:u8`, `ec25MicroSiemens:f32`, en
+little-endian. El valor solo es utilizable si `valid` es 1. SETUP y MEASUREMENT
+anteriores conservan sus formatos y UUID.

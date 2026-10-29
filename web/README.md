@@ -45,10 +45,11 @@ automática, frameworks, servidor, Wi-Fi ni almacenamiento local.
 
 ## Hito 3B
 
-Setup edita sensores, intervalo, rango, K y modelo. Al conectar se lee SETUP y
-se suscribe a SETUP/SETUP_RESULT. APPLY valida, envía un paquete de 13 bytes,
-espera el resultado con ID y vuelve a leer la configuración aplicada; CANCEL
-restaura la última confirmada. Una notificación SETUP del terminal actualiza el
+Setup edita sensores, intervalo, rango, K, modelo y compensación. APPLY envía
+los cambios conjuntamente, espera el resultado con ID y vuelve a leer la
+configuración aplicada; CANCEL restaura la última confirmada. Con firmware
+anterior utiliza SETUP y deshabilita los controles de compensación. Una
+notificación de configuración del terminal actualiza el
 formulario. Edición y APPLY permanecen deshabilitados fuera de READY, durante
 APPLY o sin conexión; volver a READY nunca aplica cambios automáticamente.
 
@@ -77,3 +78,10 @@ o por debajo, y rojo por encima. LOW por encima sugiere HIGH; HIGH por debajo
 sugiere probar LOW sin garantizar que la medida esté en su intervalo. El valor
 y el diagnóstico se asocian por `cycleId`; si falta el diagnóstico, se muestra
 el valor sin color de diagnóstico tras un segundo.
+
+Temperature Compensation permite elegir ON/OFF y alpha entre 0,00 y 5,00
+%/°C, con referencia fija de 25 °C. ON requiere PT100 + EC: una selección
+incompatible muestra un aviso y deshabilita APPLY. Measurement muestra EC25
+como lectura secundaria y como segunda curva en el eje EC cuando está activa;
+los resultados inválidos dejan huecos. EC25 llega del firmware para el mismo
+ciclo y no modifica los colores de diagnóstico de la EC medida.
