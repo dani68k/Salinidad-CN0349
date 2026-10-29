@@ -3,7 +3,7 @@ const UUID = {
   setup: '8d7b0003-6f7a-4f31-9c4d-2b6e6a7f3a10', setupCommand: '8d7b0004-6f7a-4f31-9c4d-2b6e6a7f3a10',
   setupResult: '8d7b0005-6f7a-4f31-9c4d-2b6e6a7f3a10', calibration: '8d7b0006-6f7a-4f31-9c4d-2b6e6a7f3a10',
   measurement: '8d7b0007-6f7a-4f31-9c4d-2b6e6a7f3a10', controlCommand: '8d7b0008-6f7a-4f31-9c4d-2b6e6a7f3a10',
-  controlResult: '8d7b0009-6f7a-4f31-9c4d-2b6e6a7f3a10'
+  controlResult: '8d7b0009-6f7a-4f31-9c4d-2b6e6a7f3a10', advanced: '8d7b000a-6f7a-4f31-9c4d-2b6e6a7f3a10'
 };
 const VERSION = 1, decoder = new TextDecoder(), $ = selector => document.querySelector(selector);
 const ui = { compatibility: $('#compatibility'), connect: $('#connect'), disconnect: $('#disconnect'), connection: $('#connection'), connectionDot: $('#connection-dot'),
@@ -36,6 +36,17 @@ function availability() {
   ui.once.disabled = !canEdit; ui.start.disabled = !canEdit; ui.stop.disabled = !connected() || !busy || Boolean(pendingControl);
 }
 function pendingLabel() { const changed=appliedSetup&&!sameSetup(setupDraft(),appliedSetup); ui.pending.textContent=changed?'CHANGES PENDING':'NO CHANGES'; ui.pending.classList.toggle('changed',Boolean(changed)); availability(); }
+
+function renderAdvanced(value) {
+  const ids=['mclk','start','step','increments','settling','range','vpp','pga','mode'];
+  let values=ids.map(()=> '\u2014');
+  if (value) {
+    if (value.byteLength!==20 || value.getUint8(0)!==VERSION) throw Error('ADVANCED invalid');
+    const range=value.getUint8(17), gain=value.getUint8(18), vpp=value.getUint8(19), increments=value.getUint16(13,true);
+    values=[value.getUint32(1,true),value.getUint32(5,true),value.getUint32(9,true),increments,value.getUint16(15,true),range===1?'Range 1':'\u2014',vpp?`${vpp/10} V`:'\u2014',gain===1?'x1':'\u2014',increments===0?'Single frequency':'Sweep'];
+  }
+  ids.forEach((id,i)=> { $(`#advanced-${id}`).textContent=values[i]; });
+}
 
 function decodeSetup(value) { const v=new DataView(value.buffer,value.byteOffset,value.byteLength); if(value.byteLength!==12||v.getUint8(0)!==VERSION) throw Error('SETUP no válido'); return {sensors:v.getUint8(1),interval:v.getUint32(2,true),range:v.getUint8(6),model:v.getUint8(7),cellK:v.getFloat32(8,true)}; }
 function renderSetup(s) { appliedSetup=s; ui.interval.value=s.interval; ui.range.value=s.range; ui.model.value=s.model; ui.cellK.value=s.cellK; ui.sensors.value=s.sensors; pendingLabel(); renderEc(); }
@@ -147,11 +158,12 @@ function showMeasurement(value){
   }catch(e){error(e);}
 }
 
-async function connect(){error(null);setConnection('CONNECTING…',false);ui.connect.disabled=true;try{device=await navigator.bluetooth.requestDevice({filters:[{name:'CN0349'}],optionalServices:[UUID.service]});device.addEventListener('gattserverdisconnected',disconnectEvent);const server=await device.gatt.connect(),service=await server.getPrimaryService(UUID.service);for(const [key,id] of Object.entries(UUID))if(key!=='service')ch[key]=await service.getCharacteristic(id);showStatus(await ch.status.readValue());renderSetup(decodeSetup(await ch.setup.readValue()));await readCalibration();showMeasurement(await ch.measurement.readValue());for(const [key,handler] of [['status',e=>showStatus(e.target.value)],['setup',e=>{try{renderSetup(decodeSetup(e.target.value));}catch(problem){error(problem);}}],['setupResult',setupResult],['measurement',e=>showMeasurement(e.target.value)],['controlResult',controlResult]]){await ch[key].startNotifications();ch[key].addEventListener('characteristicvaluechanged',handler);}setConnection('CONNECTED',true);availability();}catch(e){error(e);if(device?.gatt?.connected)device.gatt.disconnect();setConnection('DISCONNECTED',false);}}
-function disconnectEvent(){setConnection('DISCONNECTED',false);ch={};state=null;busy=false;appliedSetup=null;latestEc=null;measurementHistory=[];ui.ptResult.textContent='—';ui.ecResult.textContent='—';ui.cycle.textContent='Waiting for data...';renderHistory();if(pendingSetup){clearTimeout(pendingSetup.timer);pendingSetup.reject(Error('BLE disconnected'));pendingSetup=null;}if(pendingControl){clearTimeout(pendingControl.timer);pendingControl.reject(Error('BLE disconnected'));pendingControl=null;}availability();}
+async function connect(){error(null);setConnection('CONNECTING…',false);ui.connect.disabled=true;try{device=await navigator.bluetooth.requestDevice({filters:[{name:'CN0349'}],optionalServices:[UUID.service]});device.addEventListener('gattserverdisconnected',disconnectEvent);const server=await device.gatt.connect(),service=await server.getPrimaryService(UUID.service);for(const [key,id] of Object.entries(UUID))if(key!=='service'&&key!=='advanced')ch[key]=await service.getCharacteristic(id);try{ch.advanced=await service.getCharacteristic(UUID.advanced);ch.advanced.addEventListener('characteristicvaluechanged',e=>{try{renderAdvanced(e.target.value);}catch(problem){error(problem);}});await ch.advanced.startNotifications();renderAdvanced(await ch.advanced.readValue());}catch(e){ch.advanced=null;renderAdvanced(null);}showStatus(await ch.status.readValue());renderSetup(decodeSetup(await ch.setup.readValue()));await readCalibration();showMeasurement(await ch.measurement.readValue());for(const [key,handler] of [['status',e=>showStatus(e.target.value)],['setup',e=>{try{renderSetup(decodeSetup(e.target.value));}catch(problem){error(problem);}}],['setupResult',setupResult],['measurement',e=>showMeasurement(e.target.value)],['controlResult',controlResult]]){await ch[key].startNotifications();ch[key].addEventListener('characteristicvaluechanged',handler);}setConnection('CONNECTED',true);availability();}catch(e){error(e);if(device?.gatt?.connected)device.gatt.disconnect();setConnection('DISCONNECTED',false);}}
+function disconnectEvent(){renderAdvanced(null);setConnection('DISCONNECTED',false);ch={};state=null;busy=false;appliedSetup=null;latestEc=null;measurementHistory=[];ui.ptResult.textContent='—';ui.ecResult.textContent='—';ui.cycle.textContent='Waiting for data...';renderHistory();if(pendingSetup){clearTimeout(pendingSetup.timer);pendingSetup.reject(Error('BLE disconnected'));pendingSetup=null;}if(pendingControl){clearTimeout(pendingControl.timer);pendingControl.reject(Error('BLE disconnected'));pendingControl=null;}availability();}
 
 ui.connect.onclick=connect;ui.disconnect.onclick=()=>device?.gatt?.disconnect();ui.form.oninput=pendingLabel;ui.form.onsubmit=applySetup;ui.cancel.onclick=()=>appliedSetup&&renderSetup(appliedSetup);
 ui.ecDisplay.onchange=renderEc;
+$('#clear-history').onclick=()=>{measurementHistory=[];renderHistory();};
 for(const input of ui.chartScale)input.onchange=()=>{chartScaleMode=input.value;renderHistory();};
 for(const input of [ui.temperatureMin,ui.temperatureMax,ui.conductivityMin,ui.conductivityMax])input.oninput=renderHistory;
 const views=['measurement','setup','calibration'];function showView(name,updateHash=false){const active=views.includes(name)?name:'measurement';for(const view of views){$(`#${view}-view`).hidden=view!==active;$(`#nav-${view}`).setAttribute('aria-current',view===active?'page':'false');}document.title='EC WATER ANALYSIS';if(active==='measurement')renderHistory();if(updateHash)location.hash=`#/${active}`;}for(const view of views)$(`#nav-${view}`).onclick=event=>{event.preventDefault();showView(view,true);};window.addEventListener('hashchange',()=>{if(location.hash.startsWith('#/'))showView(location.hash.slice(2));});window.addEventListener('resize',()=>requestAnimationFrame(renderHistory));showView(location.hash.slice(2));

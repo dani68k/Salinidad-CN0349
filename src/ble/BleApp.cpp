@@ -64,13 +64,17 @@ void BleApp::begin() {
   controlResultCharacteristic_ = service->createCharacteristic(
       AtlantesBle::CONTROL_RESULT_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
       AtlantesBle::CONTROL_RESULT_SIZE);
-  initialized_ = statusCharacteristic_ && setupCharacteristic_ && commandCharacteristic &&
+  advancedCharacteristic_ = service->createCharacteristic(
+      AtlantesBle::ADVANCED_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
+      AtlantesBle::ADVANCED_SIZE);
+  initialized_ = advancedCharacteristic_ && statusCharacteristic_ && setupCharacteristic_ && commandCharacteristic &&
       setupResultCharacteristic_ && calibrationCharacteristic_ && measurementCharacteristic_ &&
       controlCommandCharacteristic && controlResultCharacteristic_;
   if (!initialized_) return;
   commandCharacteristic->setCallbacks(&commandCallbacks_);
   controlCommandCharacteristic->setCallbacks(&controlCallbacks_);
 
+  publishAdvanced();
   publishStatus(false);
   publishSetup(false);
   publishSetupResult(0, AtlantesBle::SetupResult::Ok);
@@ -92,9 +96,31 @@ void BleApp::update() {
   processSetupCommand();
   processControlCommand();
   publishCalibration();
+  publishAdvanced();
   publishStatus(false);
   publishSetup(false);
   publishMeasurement();
+}
+
+void BleApp::publishAdvanced() {
+  const ImpedanceApp::Profile profile = instrument_.getImpedanceProfile();
+  uint8_t payload[AtlantesBle::ADVANCED_SIZE]{};
+  payload[0] = AtlantesBle::PROTOCOL_VERSION;
+  const uint32_t values[] = {profile.mclkHz, profile.frequencyHz, profile.frequencyIncrementHz};
+  for (size_t i = 0; i < 3; ++i)
+    for (size_t b = 0; b < 4; ++b) payload[1 + i * 4 + b] = static_cast<uint8_t>(values[i] >> (8 * b));
+  payload[13] = static_cast<uint8_t>(profile.numberOfIncrements);
+  payload[14] = static_cast<uint8_t>(profile.numberOfIncrements >> 8);
+  payload[15] = static_cast<uint8_t>(profile.settlingCycles);
+  payload[16] = static_cast<uint8_t>(profile.settlingCycles >> 8);
+  payload[17] = profile.excitationRange;
+  payload[18] = profile.pgaGain;
+  payload[19] = profile.excitationRange == 1 ? 20 : 0;  // Nominal Vpp in tenths; 0 means unavailable.
+  if (hasLastAdvanced_ && memcmp(payload, lastAdvanced_, sizeof(payload)) == 0) return;
+  memcpy(lastAdvanced_, payload, sizeof(payload));
+  hasLastAdvanced_ = true;
+  advancedCharacteristic_->setValue(payload, sizeof(payload));
+  if (connected_) advancedCharacteristic_->notify();
 }
 
 void BleApp::publishStatus(bool forceNotify) {
@@ -255,6 +281,7 @@ AtlantesBle::ControlResult BleApp::controlResult(InstrumentError error) {
     case InstrumentError::Timeout: return R::Timeout;
     case InstrumentError::MeasurementFailed: return R::MeasurementFailed;
     case InstrumentError::Cancelled: return R::Cancelled;
+    case InstrumentError::Persistence: return R::InternalError;
   }
   return R::InternalError;
 }

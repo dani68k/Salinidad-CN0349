@@ -5,6 +5,7 @@
 - ATLANTES: instrumento de análisis de agua con firmware ESP32-S3, PlatformIO y Arduino; integración con WebApp BLE.
 - El código actual es la fuente de verdad para nombres, interfaces y estructura. Consultar la documentación técnica pertinente antes de cambiar contratos.
 - `README.md` es el diario cronológico del desarrollo; la documentación técnica explica arquitectura, protocolos y módulos.
+- No realizar documentación MD hasta la validación del cambio.
 - No asumir que una función descrita en hitos anteriores está implementada: comprobar únicamente los archivos relevantes.
 
 ## Estilo y arquitectura

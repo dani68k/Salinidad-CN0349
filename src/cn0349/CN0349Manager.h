@@ -5,7 +5,7 @@
 
 enum class CN0349Preset : uint8_t { CalHigh100R, CalHigh1K, CalLow1K, CalLow10K };
 enum class InstrumentError : uint8_t { None, Busy, InvalidArgument, Hardware, NotCalibrated,
-  Timeout, MeasurementFailed, Cancelled };
+  Timeout, MeasurementFailed, Cancelled, Persistence };
 enum class InstrumentState : uint8_t { NotInitialized, Calibrating, Idle, Measuring, Stopping, Error };
 enum class CalibrationState : uint8_t { Invalid, Running, Valid };
 enum class CN0349EcRange : uint8_t { High, Low };
@@ -120,6 +120,7 @@ class CN0349Manager {
   void update();
   InstrumentStatus getStatus() const;
   InstrumentSetup getSetup() const { return setup_; }
+  ImpedanceApp::Profile getImpedanceProfile() const { return acquisition_.profile(); }
   InstrumentError setSetup(const InstrumentSetup& setup);
   InstrumentError setMeasurementSensors(MeasurementSensors sensors);
   InstrumentError runCalibration();
@@ -133,6 +134,9 @@ class CN0349Manager {
   // One shared consumer slot. False means no unconsumed cycle. See architecture.md.
   bool takeMeasurementResult(MeasurementCycle& result);
  private:
+  static bool validSetup(const InstrumentSetup& setup);
+  void loadSetup();
+  bool saveSetup() const;
   bool compatible(const CN0349Calibration& c, float rfb) const;
   bool compatible(const Conductivity::AdCalibration& c, CN0349EcRange range) const;
   void buildAdCalibrations();
@@ -153,6 +157,7 @@ class CN0349Manager {
   InstrumentState state_ = InstrumentState::NotInitialized;
   InstrumentError lastError_ = InstrumentError::None;
   InstrumentSetup setup_{};
+  bool setupPersistenceFailed_ = false;
   CN0349Calibration calibrations_[4]{};
   Conductivity::AdCalibration adCalibrations_[2]{};
   uint8_t calibrationSlot_ = 0;

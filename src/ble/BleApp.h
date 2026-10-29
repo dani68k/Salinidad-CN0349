@@ -15,6 +15,8 @@ constexpr char CALIBRATION_UUID[] = "8d7b0006-6f7a-4f31-9c4d-2b6e6a7f3a10";
 constexpr char MEASUREMENT_UUID[] = "8d7b0007-6f7a-4f31-9c4d-2b6e6a7f3a10";
 constexpr char CONTROL_COMMAND_UUID[] = "8d7b0008-6f7a-4f31-9c4d-2b6e6a7f3a10";
 constexpr char CONTROL_RESULT_UUID[] = "8d7b0009-6f7a-4f31-9c4d-2b6e6a7f3a10";
+constexpr char ADVANCED_UUID[] = "8d7b000a-6f7a-4f31-9c4d-2b6e6a7f3a10";
+constexpr size_t ADVANCED_SIZE = 20;
 constexpr size_t STATUS_CAPACITY = 80;
 constexpr size_t SETUP_SIZE = 12;
 constexpr size_t SETUP_COMMAND_SIZE = 13;
@@ -72,6 +74,7 @@ class BleApp {
   };
 
   static const char* stateName(const InstrumentStatus& status);
+  void publishAdvanced();
   void publishStatus(bool forceNotify);
   void publishSetup(bool forceNotify);
   void publishSetupResult(uint8_t requestId, AtlantesBle::SetupResult result);
@@ -90,6 +93,9 @@ class BleApp {
   ServerCallbacks callbacks_{*this};
   CommandCallbacks commandCallbacks_{*this};
   ControlCallbacks controlCallbacks_{*this};
+  NimBLECharacteristic* advancedCharacteristic_ = nullptr;
+  uint8_t lastAdvanced_[AtlantesBle::ADVANCED_SIZE]{};
+  bool hasLastAdvanced_ = false;
   NimBLECharacteristic* statusCharacteristic_ = nullptr;
   NimBLECharacteristic* setupCharacteristic_ = nullptr;
   NimBLECharacteristic* setupResultCharacteristic_ = nullptr;

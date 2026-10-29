@@ -71,7 +71,7 @@
         <section class="card history-card" aria-labelledby="history-title">
           <div class="card-heading">
             <div><p class="eyebrow">LIVE DATA</p><h2 id="history-title">Measurement history</h2></div>
-            <span id="history-count" class="history-count">0 / 50 cycles</span>
+            <div class="history-actions"><span id="history-count" class="history-count">0 / 50 cycles</span><button id="clear-history" type="button" class="button secondary" aria-label="Clear measurement history">CLEAR</button></div>
           </div>
           <div id="measurement-chart" class="measurement-chart" role="img" aria-label="Measurement history chart; waiting for data"></div>
           <div class="chart-legend" aria-hidden="true">
@@ -92,6 +92,7 @@
           <div><p class="eyebrow">SETUP</p><h1>Sensor configuration</h1></div>
           <p class="page-caption">Device settings and confirmed values</p>
         </div>
+        <div class="setup-columns">
         <section class="card setup-card" aria-labelledby="setup-title">
           <div class="card-heading">
             <div><p class="eyebrow">REQUESTED CONFIGURATION</p><h2 id="setup-title">Measurement setup</h2></div>
@@ -111,7 +112,24 @@
               <div class="button-row"><button id="cancel" type="button" class="button secondary">CANCEL</button><button id="apply" type="submit" class="button primary">APPLY CONFIGURATION</button></div>
             </div>
           </form>
-          <section class="display-settings" aria-label="Measurement display settings">
+        </section>
+        <section class="card setup-card advanced-card" aria-labelledby="advanced-title">
+          <div class="card-heading"><div><p class="eyebrow">AD5934 PROFILE</p><h2 id="advanced-title">Advanced setup</h2></div><span class="status-badge" data-state="muted">READ ONLY</span></div>
+          <p class="hint">Configured acquisition profile; not a live hardware readback.</p>
+          <dl class="advanced-grid">
+            <div><dt>MCLK (Hz)</dt><dd id="advanced-mclk">&mdash;</dd></div>
+            <div><dt>Start frequency (Hz)</dt><dd id="advanced-start">&mdash;</dd></div>
+            <div><dt>Frequency step (Hz)</dt><dd id="advanced-step">&mdash;</dd></div>
+            <div><dt>Number of increments</dt><dd id="advanced-increments">&mdash;</dd></div>
+            <div><dt>Settling cycles</dt><dd id="advanced-settling">&mdash;</dd></div>
+            <div><dt>Output range</dt><dd id="advanced-range">&mdash;</dd></div>
+            <div><dt>Excitation Vpp nominal</dt><dd id="advanced-vpp">&mdash;</dd></div>
+            <div><dt>PGA gain</dt><dd id="advanced-pga">&mdash;</dd></div>
+            <div><dt>Measurement mode</dt><dd id="advanced-mode">&mdash;</dd></div>
+          </dl>
+        </section>
+        </div>
+        <section class="card setup-card display-settings" aria-label="Measurement display settings">
             <div class="display-preference">
               <p class="eyebrow">EC DISPLAY UNITS</p>
               <label class="sr-only" for="ec-display">EC display units</label>
@@ -133,7 +151,6 @@
               </div>
             </section>
           </section>
-        </section>
       </div>
 
       <div id="calibration-view" class="page-view" hidden>

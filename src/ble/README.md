@@ -94,3 +94,12 @@ como ERROR. NimBLE reanuda advertising al desconectar.
 
 Dependencias: CN0349Manager y NimBLE-Arduino 2.x. Limitaciones 3A: sin escritura,
 órdenes, seguridad, bonding, reconexión de cliente, medidas ni configuración BLE.
+
+## Advanced Setup
+
+ADVANCED `8d7b000a-6f7a-4f31-9c4d-2b6e6a7f3a10` ofrece READ + NOTIFY.
+Su paquete de 20 bytes little-endian contiene version u8, MCLK, frecuencia inicial
+y paso (tres u32 en Hz), numero de incrementos y settling (dos u16), rango y
+PGA (u8), y Vpp nominal en decimas (u8; 0 si no esta disponible). Son valores
+del perfil configurado, no lectura de registros. `update()` publica cambios sin
+acceso I2C. El modo se deduce del numero de incrementos.

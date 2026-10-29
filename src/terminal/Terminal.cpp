@@ -66,6 +66,7 @@ const char* Terminal::errorName(InstrumentError error) {
     case InstrumentError::Timeout: return "ERR TIMEOUT";
     case InstrumentError::MeasurementFailed: return "ERR MEASUREMENT_FAILED";
     case InstrumentError::Cancelled: return "ERR CANCELLED";
+    case InstrumentError::Persistence: return "ERR PERSISTENCE (SETUP APPLIED IN RAM)";
   }
   return "ERR MEASUREMENT_FAILED";
 }

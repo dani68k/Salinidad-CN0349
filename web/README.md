@@ -65,3 +65,8 @@ Web Bluetooth depende del navegador y del contexto seguro. Si `file://` no
 expone `navigator.bluetooth`, la página lo indica; para la prueba manual puede
 ser necesario servir `web/` mediante `localhost`. No hay dependencias externas,
 almacenamiento local ni reconexión automática.
+
+Setup muestra el perfil AD5934 configurado en un panel de solo lectura y lo
+actualiza mediante ADVANCED; no representa una lectura actual de registros. Si
+la caracteristica no esta disponible, muestra los valores como no disponibles.
+La distribucion apila los paneles en pantallas pequenas.

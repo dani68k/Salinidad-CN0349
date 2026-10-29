@@ -2,6 +2,8 @@
 #include "ImpedanceMath.h"
 #include "config.h"
 #include <math.h>
+#include <Preferences.h>
+#include <string.h>
 namespace {
 bool selected(MeasurementSensors s, MeasurementSensors bit) {
   return (static_cast<uint8_t>(s) & static_cast<uint8_t>(bit)) != 0;
@@ -10,6 +12,7 @@ MuxApp::CalibrationPreset muxPreset(CN0349Preset p) { return static_cast<MuxApp:
 }
 InstrumentError CN0349Manager::begin(bool busReady) {
   if (initialized_) return InstrumentError::Busy;
+  loadSetup();
   initialized_ = true; busReady_ = busReady;
   if (!acquisition_.requestRecovery(busReady_)) {
     state_ = InstrumentState::Error; return lastError_ = InstrumentError::Hardware;
@@ -57,16 +60,60 @@ bool CN0349Manager::getAdCalibrationStatus(CN0349EcRange range, Conductivity::Ad
   result = adCalibrations_[range == CN0349EcRange::High ? 0 : 1];
   return true;
 }
+bool CN0349Manager::validSetup(const InstrumentSetup& setup) {
+  const auto sensors = static_cast<uint8_t>(setup.sensors), preset = static_cast<uint8_t>(setup.ecCalibration);
+  return sensors >= 1 && sensors <= 3 && setup.intervalMs > 0 && setup.intervalMs <= 0x7fffffffUL &&
+      (setup.ecRange == CN0349EcRange::High || setup.ecRange == CN0349EcRange::Low) &&
+      preset < 4 && (setup.ecRange == CN0349EcRange::High ? preset < 2 : preset >= 2) &&
+      (setup.ecModel == Conductivity::Model::Raw || setup.ecModel == Conductivity::Model::SeriesR2Experimental ||
+       setup.ecModel == Conductivity::Model::AnalogDevices) && isfinite(setup.nominalKPerCm) && setup.nominalKPerCm > 0;
+}
+
+void CN0349Manager::loadSetup() {
+  Preferences preferences;
+  if (!preferences.begin("cn0349", true)) return;
+  uint8_t blob[20]{};
+  const size_t length = preferences.getBytesLength("setup");
+  const bool read = (length == 12 || length == sizeof(blob)) &&
+      preferences.getBytes("setup", blob, length) == length;
+  preferences.end();
+  if (!read || !((blob[0] == 1 && length == 12) || (blob[0] == 2 && length == sizeof(blob))) ||
+      blob[1] < 1 || blob[1] > 3 || blob[2] > 1 || blob[3] > 2) return;
+  InstrumentSetup candidate = setup_;
+  candidate.sensors = static_cast<MeasurementSensors>(blob[1]);
+  candidate.ecRange = blob[2] ? CN0349EcRange::High : CN0349EcRange::Low;
+  candidate.ecCalibration = blob[2] ? CN0349Preset::CalHigh100R : CN0349Preset::CalLow10K;
+  candidate.ecModel = static_cast<Conductivity::Model>(blob[3]);
+  candidate.intervalMs = static_cast<uint32_t>(blob[4]) | (static_cast<uint32_t>(blob[5]) << 8) |
+      (static_cast<uint32_t>(blob[6]) << 16) | (static_cast<uint32_t>(blob[7]) << 24);
+  static_assert(sizeof(float) == 4, "Setup NVS requires float32");
+  memcpy(&candidate.nominalKPerCm, blob + 8, sizeof(float));
+  if (validSetup(candidate)) setup_ = candidate;
+}
+
+bool CN0349Manager::saveSetup() const {
+  uint8_t blob[12]{};
+  blob[0] = 1;
+  blob[1] = static_cast<uint8_t>(setup_.sensors);
+  blob[2] = setup_.ecRange == CN0349EcRange::High ? 1 : 0;
+  blob[3] = static_cast<uint8_t>(setup_.ecModel);
+  for (size_t i = 0; i < 4; ++i) blob[4 + i] = static_cast<uint8_t>(setup_.intervalMs >> (8 * i));
+  memcpy(blob + 8, &setup_.nominalKPerCm, sizeof(float));
+  Preferences preferences;
+  if (!preferences.begin("cn0349", false)) return false;
+  const bool written = preferences.putBytes("setup", blob, sizeof(blob)) == sizeof(blob);
+  preferences.end();
+  return written;
+}
+
 InstrumentError CN0349Manager::setSetup(const InstrumentSetup& setup) {
   if (isBusy()) return InstrumentError::Busy;
-  const auto sensors = static_cast<uint8_t>(setup.sensors), preset = static_cast<uint8_t>(setup.ecCalibration);
-  if (sensors < 1 || sensors > 3 || setup.intervalMs == 0 || setup.intervalMs > 0x7fffffffUL ||
-      (setup.ecRange != CN0349EcRange::High && setup.ecRange != CN0349EcRange::Low) ||
-      preset >= 4 || (setup.ecRange == CN0349EcRange::High ? preset >= 2 : preset < 2) ||
-      (setup.ecModel != Conductivity::Model::Raw && setup.ecModel != Conductivity::Model::SeriesR2Experimental &&
-       setup.ecModel != Conductivity::Model::AnalogDevices) || !isfinite(setup.nominalKPerCm) || setup.nominalKPerCm <= 0)
-    return InstrumentError::InvalidArgument;
-  setup_ = setup; return InstrumentError::None;
+  if (!validSetup(setup)) return InstrumentError::InvalidArgument;
+  const bool changed = setup.sensors != setup_.sensors || setup.intervalMs != setup_.intervalMs ||
+      setup.ecRange != setup_.ecRange || setup.ecModel != setup_.ecModel || setup.nominalKPerCm != setup_.nominalKPerCm;
+  setup_ = setup;
+  if (changed) setupPersistenceFailed_ = !saveSetup();
+  return setupPersistenceFailed_ ? InstrumentError::Persistence : InstrumentError::None;
 }
 InstrumentError CN0349Manager::setMeasurementSensors(MeasurementSensors sensors) {
   auto setup = setup_; setup.sensors = sensors; return setSetup(setup);

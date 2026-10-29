@@ -38,3 +38,6 @@ y pérdidas silenciosas; [contrato completo](../../docs/architecture.md).
 Dependencias: ImpedanceApp, ImpedanceMath, Pt100, Conductivity y Config. Las
 tres extensiones históricas del gestor y sus parsers/programadores separados
 se retiraron. Las fórmulas de conversión siguen en sus módulos puros.
+
+`getImpedanceProfile()` devuelve una copia del perfil configurado de adquisicion
+AD5934; no lee registros ni confirma el estado actual del hardware.
