@@ -95,6 +95,12 @@ como ERROR. NimBLE reanuda advertising al desconectar.
 Dependencias: CN0349Manager y NimBLE-Arduino 2.x. Limitaciones 3A: sin escritura,
 órdenes, seguridad, bonding, reconexión de cliente, medidas ni configuración BLE.
 
+Al desconectarse el último central, el callback descarta las órdenes de control
+BLE pendientes y solicita una parada. `update()` ejecuta `stopMeasurement()`
+si hay una medición activa o continua; la parada sigue el flujo habitual del
+controlador. Las mediciones iniciadas posteriormente desde Terminal pueden
+funcionar sin un central conectado.
+
 ## Advanced Setup
 
 ADVANCED `8d7b000a-6f7a-4f31-9c4d-2b6e6a7f3a10` ofrece READ + NOTIFY.
@@ -103,3 +109,12 @@ y paso (tres u32 en Hz), numero de incrementos y settling (dos u16), rango y
 PGA (u8), y Vpp nominal en decimas (u8; 0 si no esta disponible). Son valores
 del perfil configurado, no lectura de registros. `update()` publica cambios sin
 acceso I2C. El modo se deduce del numero de incrementos.
+
+## Diagnóstico de rango EC
+
+EC_DIAGNOSTIC `8d7b000b-6f7a-4f31-9c4d-2b6e6a7f3a10` ofrece READ + NOTIFY
+y conserva intacto MEASUREMENT. Sus 7 bytes little-endian son `version:u8`,
+`cycleId:u32`, `diagnostic:u8` y `range:u8`. Diagnóstico: 0 InvalidCal,
+1 InRange, 2 NearLimit, 3 BelowRange y 4 AboveRange. Rango: 0 LOW, 1 HIGH,
+255 EC no seleccionado. El diagnóstico se publica con el mismo ciclo que la
+medición; una medida EC inválida se transmite como InvalidCal.

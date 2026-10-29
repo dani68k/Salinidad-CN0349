@@ -10,6 +10,7 @@ enum class InstrumentState : uint8_t { NotInitialized, Calibrating, Idle, Measur
 enum class CalibrationState : uint8_t { Invalid, Running, Valid };
 enum class CN0349EcRange : uint8_t { High, Low };
 enum class MeasurementSensors : uint8_t { Pt100 = 1, Ec = 2, Both = 3 };
+enum class EcRangeDiagnostic : uint8_t { InvalidCal, InRange, NearLimit, BelowRange, AboveRange };
 static constexpr uint8_t CN0349_CALIBRATION_SAMPLES = 5;
 struct CN0349Calibration {
   CN0349Preset preset = CN0349Preset::CalHigh100R;
@@ -84,6 +85,7 @@ struct InstrumentSetup {
 };
 struct SensorMeasurement {
   MeasurementSensors sensor = MeasurementSensors::Pt100;
+  EcRangeDiagnostic ecRangeDiagnostic = EcRangeDiagnostic::InvalidCal;
   CN0349ImpedanceResult acquisition{};
   Pt100::Result temperature{};
   Conductivity::Result conductivity{};
@@ -138,6 +140,7 @@ class CN0349Manager {
   void loadSetup();
   bool saveSetup() const;
   bool compatible(const CN0349Calibration& c, float rfb) const;
+  EcRangeDiagnostic diagnoseEcRange(CN0349EcRange range, float magnitude, float effectiveFrequencyHz) const;
   bool compatible(const Conductivity::AdCalibration& c, CN0349EcRange range) const;
   void buildAdCalibrations();
   InstrumentError preflight() const;

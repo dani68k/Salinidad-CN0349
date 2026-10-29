@@ -66,6 +66,9 @@ h2 { margin: 4px 0 0; font-size: 1rem; font-weight: 600; }
 .result-card { min-height: 84px; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 9px 14px; border: 1px solid #233b4d; border-radius: 9px; background: #122131; text-align: center; }
 .result-card .eyebrow { color: #7fa8c3; }
 .reading-value { max-width: 100%; margin: 6px 0 0; color: #f1f7fb; font-size: clamp(1.25rem, 2.2vw, 1.8rem); font-variant-numeric: tabular-nums; font-weight: 550; overflow-wrap: anywhere; }
+#ec-result[data-range-diagnostic="near"], #ec-result[data-range-diagnostic="below"] { color: #f4a65a; }
+#ec-result[data-range-diagnostic="above"] { color: #f06c6c; }
+.ec-range-recommendation { margin: 6px 0 0; color: #f4a65a; font-size: .72rem; }
 .reading-unit { color: #8fb1c8; font-size: .8rem; }
 .history-card { margin-top: 10px; padding: 16px 18px 14px; }
 .history-count { color: #89a3b7; font-size: .68rem; font-variant-numeric: tabular-nums; }

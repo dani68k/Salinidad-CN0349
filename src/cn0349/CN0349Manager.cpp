@@ -5,6 +5,7 @@
 #include <Preferences.h>
 #include <string.h>
 namespace {
+constexpr float EC_RANGE_NEAR_FRACTION = 0.85f;
 bool selected(MeasurementSensors s, MeasurementSensors bit) {
   return (static_cast<uint8_t>(s) & static_cast<uint8_t>(bit)) != 0;
 }
@@ -49,6 +50,23 @@ bool CN0349Manager::compatible(const CN0349Calibration& c, float rfb) const {
       isfinite(c.meanMagnitude) && c.meanMagnitude > 0 && isfinite(c.meanPhaseDeg) &&
       c.frequencyHz == p.frequencyHz && c.mclkHz == p.mclkHz &&
       c.excitationRange == p.excitationRange && c.pgaGain == p.pgaGain && c.settlingCycles == p.settlingCycles;
+}
+EcRangeDiagnostic CN0349Manager::diagnoseEcRange(CN0349EcRange range, float magnitude, float effectiveFrequencyHz) const {
+  const uint8_t first = range == CN0349EcRange::High ? 0 : 2;
+  const auto& a = calibrations_[first];
+  const auto& b = calibrations_[first + 1];
+  const float rfb = range == CN0349EcRange::High ? 100.0f : 1000.0f;
+  if (!isfinite(magnitude) || magnitude <= 0 || !compatible(a, rfb) || !compatible(b, rfb) ||
+      !CN0349Math::sameEffectiveFrequency(a.effectiveFrequencyHz, effectiveFrequencyHz) ||
+      !CN0349Math::sameEffectiveFrequency(b.effectiveFrequencyHz, effectiveFrequencyHz))
+    return EcRangeDiagnostic::InvalidCal;
+  const float minimum = a.meanMagnitude < b.meanMagnitude ? a.meanMagnitude : b.meanMagnitude;
+  const float maximum = a.meanMagnitude > b.meanMagnitude ? a.meanMagnitude : b.meanMagnitude;
+  if (!(maximum > minimum)) return EcRangeDiagnostic::InvalidCal;
+  if (magnitude < minimum) return EcRangeDiagnostic::BelowRange;
+  if (magnitude > maximum) return EcRangeDiagnostic::AboveRange;
+  if (magnitude >= minimum + EC_RANGE_NEAR_FRACTION * (maximum - minimum)) return EcRangeDiagnostic::NearLimit;
+  return EcRangeDiagnostic::InRange;
 }
 bool CN0349Manager::getCalibrationStatus(CN0349Preset preset, CN0349Calibration& result) const {
   const auto i = static_cast<uint8_t>(preset);
@@ -299,6 +317,8 @@ void CN0349Manager::finishSensor() {
         a.rawPhaseDeg, a.calibrationPhaseDeg, a.apparentImpedanceOhms, a.correctedPhaseDeg))) r.error = InstrumentError::MeasurementFailed;
     else {
       a.valid = true;
+      if (activeSensor_ == MeasurementSensors::Ec)
+        r.ecRangeDiagnostic = diagnoseEcRange(cycle_.setup.ecRange, a.magnitude, a.effectiveFrequencyHz);
       if (activeSensor_ == MeasurementSensors::Pt100) { r.temperature = Pt100::convert(a.apparentImpedanceOhms); r.valid = r.temperature.valid; }
       else if (cycle_.setup.ecModel == Conductivity::Model::AnalogDevices) {
         const auto& ad = adCalibrations_[cycle_.setup.ecRange == CN0349EcRange::High ? 0 : 1];

@@ -16,6 +16,8 @@ constexpr char MEASUREMENT_UUID[] = "8d7b0007-6f7a-4f31-9c4d-2b6e6a7f3a10";
 constexpr char CONTROL_COMMAND_UUID[] = "8d7b0008-6f7a-4f31-9c4d-2b6e6a7f3a10";
 constexpr char CONTROL_RESULT_UUID[] = "8d7b0009-6f7a-4f31-9c4d-2b6e6a7f3a10";
 constexpr char ADVANCED_UUID[] = "8d7b000a-6f7a-4f31-9c4d-2b6e6a7f3a10";
+constexpr char EC_DIAGNOSTIC_UUID[] = "8d7b000b-6f7a-4f31-9c4d-2b6e6a7f3a10";
+constexpr size_t EC_DIAGNOSTIC_SIZE = 7;
 constexpr size_t ADVANCED_SIZE = 20;
 constexpr size_t STATUS_CAPACITY = 80;
 constexpr size_t SETUP_SIZE = 12;
@@ -101,6 +103,7 @@ class BleApp {
   NimBLECharacteristic* setupResultCharacteristic_ = nullptr;
   NimBLECharacteristic* calibrationCharacteristic_ = nullptr;
   NimBLECharacteristic* measurementCharacteristic_ = nullptr;
+  NimBLECharacteristic* ecDiagnosticCharacteristic_ = nullptr;
   NimBLECharacteristic* controlResultCharacteristic_ = nullptr;
   bool initialized_ = false;
   volatile bool connected_ = false;
@@ -116,6 +119,7 @@ class BleApp {
   uint8_t lastCalibration_[AtlantesBle::CALIBRATION_SIZE]{};
   bool hasLastCalibration_ = false;
   portMUX_TYPE controlMux_ = portMUX_INITIALIZER_UNLOCKED;
+  bool disconnectStopPending_ = false;
   volatile bool controlPending_ = false;
   volatile bool controlRejectedPending_ = false;
   volatile uint8_t controlRejectedRequestId_ = 0;

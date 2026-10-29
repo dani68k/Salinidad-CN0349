@@ -41,3 +41,9 @@ se retiraron. Las fórmulas de conversión siguen en sus módulos puros.
 
 `getImpedanceProfile()` devuelve una copia del perfil configurado de adquisicion
 AD5934; no lee registros ni confirma el estado actual del hardware.
+
+`SensorMeasurement::ecRangeDiagnostic` clasifica la magnitud DFT EC frente a
+las dos referencias compatibles del rango activo: `InvalidCal` si no hay un
+intervalo válido, `BelowRange` o `AboveRange` fuera del intervalo, `NearLimit`
+en su último 15 % y `InRange` en el resto. Una lectura DFT fallida conserva
+`InvalidCal`. El diagnóstico no modifica la conversión ni selecciona el rango.

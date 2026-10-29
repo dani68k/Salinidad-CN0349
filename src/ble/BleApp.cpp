@@ -4,11 +4,20 @@
 #include <string.h>
 
 void BleApp::ServerCallbacks::onConnect(NimBLEServer*, NimBLEConnInfo&) {
+  portENTER_CRITICAL(&owner_.controlMux_);
   owner_.connected_ = true;
+  portEXIT_CRITICAL(&owner_.controlMux_);
 }
 
-void BleApp::ServerCallbacks::onDisconnect(NimBLEServer*, NimBLEConnInfo&, int) {
-  owner_.connected_ = false;
+void BleApp::ServerCallbacks::onDisconnect(NimBLEServer* server, NimBLEConnInfo&, int) {
+  portENTER_CRITICAL(&owner_.controlMux_);
+  owner_.connected_ = server->getConnectedCount() != 0;
+  if (!owner_.connected_) {
+    owner_.disconnectStopPending_ = true;
+    owner_.controlPending_ = false;
+    owner_.controlRejectedPending_ = false;
+  }
+  portEXIT_CRITICAL(&owner_.controlMux_);
 }
 
 void BleApp::CommandCallbacks::onWrite(NimBLECharacteristic* characteristic, NimBLEConnInfo&) {
@@ -58,6 +67,9 @@ void BleApp::begin() {
   measurementCharacteristic_ = service->createCharacteristic(
       AtlantesBle::MEASUREMENT_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
       AtlantesBle::MEASUREMENT_SIZE);
+  ecDiagnosticCharacteristic_ = service->createCharacteristic(
+      AtlantesBle::EC_DIAGNOSTIC_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
+      AtlantesBle::EC_DIAGNOSTIC_SIZE);
   NimBLECharacteristic* controlCommandCharacteristic = service->createCharacteristic(
       AtlantesBle::CONTROL_COMMAND_UUID, NIMBLE_PROPERTY::WRITE,
       AtlantesBle::CONTROL_COMMAND_SIZE);
@@ -68,7 +80,7 @@ void BleApp::begin() {
       AtlantesBle::ADVANCED_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
       AtlantesBle::ADVANCED_SIZE);
   initialized_ = advancedCharacteristic_ && statusCharacteristic_ && setupCharacteristic_ && commandCharacteristic &&
-      setupResultCharacteristic_ && calibrationCharacteristic_ && measurementCharacteristic_ &&
+      setupResultCharacteristic_ && calibrationCharacteristic_ && measurementCharacteristic_ && ecDiagnosticCharacteristic_ &&
       controlCommandCharacteristic && controlResultCharacteristic_;
   if (!initialized_) return;
   commandCharacteristic->setCallbacks(&commandCallbacks_);
@@ -83,6 +95,10 @@ void BleApp::begin() {
   uint8_t emptyMeasurement[AtlantesBle::MEASUREMENT_SIZE]{};
   emptyMeasurement[0] = AtlantesBle::PROTOCOL_VERSION;
   measurementCharacteristic_->setValue(emptyMeasurement, sizeof(emptyMeasurement));
+  uint8_t emptyDiagnostic[AtlantesBle::EC_DIAGNOSTIC_SIZE]{};
+  emptyDiagnostic[0] = AtlantesBle::PROTOCOL_VERSION;
+  emptyDiagnostic[6] = 0xff;
+  ecDiagnosticCharacteristic_->setValue(emptyDiagnostic, sizeof(emptyDiagnostic));
   service->start();
   NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
   advertising->setName(AtlantesBle::DEVICE_NAME);
@@ -93,6 +109,15 @@ void BleApp::begin() {
 
 void BleApp::update() {
   if (!initialized_) return;
+  portENTER_CRITICAL(&controlMux_);
+  const bool stopAfterDisconnect = disconnectStopPending_;
+  disconnectStopPending_ = false;
+  portEXIT_CRITICAL(&controlMux_);
+  if (stopAfterDisconnect) {
+    const InstrumentStatus status = instrument_.getStatus();
+    if (status.continuous || status.state == InstrumentState::Measuring ||
+        status.state == InstrumentState::Stopping) instrument_.stopMeasurement();
+  }
   processSetupCommand();
   processControlCommand();
   publishCalibration();
@@ -257,6 +282,12 @@ void BleApp::publishMeasurement() {
   payload[17] = static_cast<uint8_t>(cycle.ec.conductivity.error);
   memcpy(payload + 18, &cycle.ec.conductivity.microSiemensPerCm, sizeof(float));
   memcpy(payload + 22, &cycle.ec.conductivity.milliSiemensPerCm, sizeof(float));
+  const uint8_t diagnostic[AtlantesBle::EC_DIAGNOSTIC_SIZE] = {
+      AtlantesBle::PROTOCOL_VERSION, payload[2], payload[3], payload[4], payload[5],
+      static_cast<uint8_t>(cycle.ec.valid ? cycle.ec.ecRangeDiagnostic : EcRangeDiagnostic::InvalidCal),
+      static_cast<uint8_t>(!ecSelected ? 0xff : cycle.setup.ecRange == CN0349EcRange::High ? 1 : 0)};
+  ecDiagnosticCharacteristic_->setValue(diagnostic, sizeof(diagnostic));
+  if (connected_) ecDiagnosticCharacteristic_->notify();
   measurementCharacteristic_->setValue(payload, sizeof(payload));
   if (connected_) measurementCharacteristic_->notify();
   lastPublishedCycle_ = status.publishedCycles;
@@ -288,6 +319,10 @@ AtlantesBle::ControlResult BleApp::controlResult(InstrumentError error) {
 
 void BleApp::enqueueControlCommand(const uint8_t* data, size_t size) {
   portENTER_CRITICAL(&controlMux_);
+  if (!connected_) {
+    portEXIT_CRITICAL(&controlMux_);
+    return;
+  }
   if (controlPending_) {
     controlRejectedRequestId_ = size > 1 ? data[1] : 0;
     controlRejectedOperation_ = size > 2 ? data[2] : 0;

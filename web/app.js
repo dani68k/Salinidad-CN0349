@@ -3,7 +3,8 @@ const UUID = {
   setup: '8d7b0003-6f7a-4f31-9c4d-2b6e6a7f3a10', setupCommand: '8d7b0004-6f7a-4f31-9c4d-2b6e6a7f3a10',
   setupResult: '8d7b0005-6f7a-4f31-9c4d-2b6e6a7f3a10', calibration: '8d7b0006-6f7a-4f31-9c4d-2b6e6a7f3a10',
   measurement: '8d7b0007-6f7a-4f31-9c4d-2b6e6a7f3a10', controlCommand: '8d7b0008-6f7a-4f31-9c4d-2b6e6a7f3a10',
-  controlResult: '8d7b0009-6f7a-4f31-9c4d-2b6e6a7f3a10', advanced: '8d7b000a-6f7a-4f31-9c4d-2b6e6a7f3a10'
+  controlResult: '8d7b0009-6f7a-4f31-9c4d-2b6e6a7f3a10', advanced: '8d7b000a-6f7a-4f31-9c4d-2b6e6a7f3a10',
+  ecDiagnostic: '8d7b000b-6f7a-4f31-9c4d-2b6e6a7f3a10'
 };
 const VERSION = 1, decoder = new TextDecoder(), $ = selector => document.querySelector(selector);
 const ui = { compatibility: $('#compatibility'), connect: $('#connect'), disconnect: $('#disconnect'), connection: $('#connection'), connectionDot: $('#connection-dot'),
@@ -18,7 +19,7 @@ const ui = { compatibility: $('#compatibility'), connect: $('#connect'), disconn
   conductivityMin: $('#conductivity-min'), conductivityMax: $('#conductivity-max') };
 let device, ch = {}, appliedSetup = null, state = null, busy = false, applying = false, requestId = 0;
 let pendingSetup = null, pendingControl = null, previousState = null, latestEc = null, measurementHistory = [];
-let chartScaleMode = 'auto';
+let chartScaleMode = 'auto', latestEcDiagnostic = null, previousCalibrationCount = null, pendingEc = null, pendingEcTimer = null;
 const controlErrors = ['OK','INVALID_LENGTH','UNSUPPORTED_VERSION','INVALID_OPERATION','NOT_READY','BUSY','INVALID_ARGUMENT','HARDWARE','NOT_CALIBRATED','TIMEOUT','MEASUREMENT_FAILED','CANCELLED','INTERNAL_ERROR'];
 const instrumentErrors = ['OK','BUSY','INVALID_ARGUMENT','HARDWARE','NOT_CALIBRATED','TIMEOUT','MEASUREMENT_FAILED','CANCELLED'];
 const conductivityErrors = ['OK','NOT_RUN','INVALID_MODEL','INVALID_IMPEDANCE','INVALID_K','INVALID_R2','NON_POSITIVE_RESISTANCE','OVERFLOW','CAL_INVALID','CAL_MISMATCH','INVALID_MAGNITUDE','NON_POSITIVE_ADMITTANCE','INVALID_DENOMINATOR'];
@@ -57,7 +58,7 @@ function finishPending(holder,code,names) { clearTimeout(holder.timer); code===0
 async function applySetup(event) { event.preventDefault(); if(!ready())return; applying=true;availability();error(null); try{const id=requestId=++requestId&255, packet=encodeSetup(setupDraft(),id),ack=wait('setup',id);await ch.setupCommand.writeValueWithResponse(packet);await ack;renderSetup(decodeSetup(await ch.setup.readValue()));}catch(e){if(pendingSetup){clearTimeout(pendingSetup.timer);pendingSetup=null;}error(e);}finally{applying=false;availability();} }
 async function control(op,arg=0) { if(pendingControl)throw Error('Hay otra orden pendiente'); const id=requestId=++requestId&255,b=Uint8Array.of(VERSION,id,op,arg),ack=wait('control',id,op); availability(); try{await ch.controlCommand.writeValueWithResponse(b);await ack;}catch(e){if(pendingControl){clearTimeout(pendingControl.timer);pendingControl=null;}throw e;}finally{availability();} }
 
-function showStatus(value) { try{const s=JSON.parse(decoder.decode(value));previousState=state;state=s.state;busy=s.busy;ui.instrument.textContent=state;ui.cal.textContent=`${s.cal}/4`;ui.busy.textContent=busy?'Yes':'No';availability();if(previousState==='CALIBRATING'&&state!=='CALIBRATING')readCalibration();}catch(e){error(e);} }
+function showStatus(value) { try{const s=JSON.parse(decoder.decode(value));previousState=state;state=s.state;busy=s.busy;if((previousState!==state&&state==='CALIBRATING')||(previousCalibrationCount!==null&&s.cal<previousCalibrationCount)){latestEcDiagnostic=null;clearTimeout(pendingEcTimer);pendingEc=null;if(latestEc){latestEc.diagnostic=0;renderEc();}}previousCalibrationCount=s.cal;ui.instrument.textContent=state;ui.cal.textContent=`${s.cal}/4`;ui.busy.textContent=busy?'Yes':'No';availability();if(previousState==='CALIBRATING'&&state!=='CALIBRATING')readCalibration();}catch(e){error(e);} }
 function setupResult(event){const v=event.target.value;if(!pendingSetup||v.byteLength!==3||v.getUint8(1)!==pendingSetup.id)return;const p=pendingSetup;pendingSetup=null;finishPending(p,v.getUint8(2),['OK','INVALID_LENGTH','UNSUPPORTED_VERSION','INVALID_VALUE','NOT_READY','BUSY','INTERNAL_ERROR']);}
 function controlResult(event){const v=event.target.value;if(!pendingControl||v.byteLength!==4||v.getUint8(1)!==pendingControl.id||v.getUint8(2)!==pendingControl.op)return;const p=pendingControl;pendingControl=null;finishPending(p,v.getUint8(3),controlErrors);}
 
@@ -129,12 +130,27 @@ function renderHistory() {
 function renderEc(){
   const models=['RAW','SERIES','AD'],model=latestEc?.model??appliedSetup?.model;
   ui.ecTitle.textContent=`Conductivity with ${models[model]||'—'}`;
+  const diagnosis=latestEc?.state===1?latestEc.diagnostic:0;
+  ui.ecResult.dataset.rangeDiagnostic=({2:'near',3:'below',4:'above'})[diagnosis]||'';
+  const recommendation=$('#ec-range-recommendation');
+  const suggestHigh=diagnosis===4&&latestEc?.range===0;
+  const suggestLow=diagnosis===3&&latestEc?.range===1;
+  recommendation.hidden=!(suggestHigh||suggestLow);
+  recommendation.textContent=suggestHigh?'Recommended: switch to HIGH':suggestLow?'Recommended: try LOW':'';
   if(latestEc){
     const {state,error:ecError,detail,microSiemens,milliSiemens}=latestEc;
     const failure=ecError===6&&detail>1?(conductivityErrors[detail]||'MEASUREMENT_FAILED'):(instrumentErrors[ecError]||'ERROR');
     ui.ecResult.textContent=state===0?'Not selected':state===1?`${ui.ecDisplay.value==='us'?`${microSiemens.toFixed(1)} µS/cm`:ui.ecDisplay.value==='ms'?`${milliSiemens.toFixed(3)} mS/cm`:`${microSiemens.toFixed(1)} µS/cm · ${milliSiemens.toFixed(3)} mS/cm`}`:failure;
   }
   renderHistory();
+}
+function showEcDiagnostic(value){
+  if(value.byteLength!==7||value.getUint8(0)!==VERSION)return;
+  const cycle=value.getUint32(1,true),diagnostic=value.getUint8(5),range=value.getUint8(6);
+  if(!cycle||diagnostic>4||range>1){latestEcDiagnostic=null;return;}
+  latestEcDiagnostic={cycle,diagnostic,range};
+  if(pendingEc?.cycle===cycle){clearTimeout(pendingEcTimer);pendingEc.diagnostic=diagnostic;pendingEc.range=range;latestEc=pendingEc;pendingEc=null;renderEc();return;}
+  if(latestEc?.cycle===cycle){latestEc.diagnostic=diagnostic;latestEc.range=range;renderEc();}
 }
 function showMeasurement(value){
   try{
@@ -149,8 +165,14 @@ function showMeasurement(value){
     ui.cycle.textContent=`Cycle ${cycle} · ${overall===1?'OK':instrumentErrors[overallError]||'ERROR'}`;
     const ptState=v.getUint8(8),ptError=v.getUint8(9),temperature=v.getFloat32(10,true);
     ui.ptResult.textContent=ptState===0?'Not selected':ptState===1?`${temperature.toFixed(2)} °C`:instrumentErrors[ptError]||'ERROR';
-    latestEc={state:v.getUint8(14),error:v.getUint8(15),detail:v.getUint8(17),model:v.getUint8(16),microSiemens:v.getFloat32(18,true),milliSiemens:v.getFloat32(22,true)};
-    const point={cycle,temperature:ptState===1&&Number.isFinite(temperature)?temperature:null,microSiemens:latestEc.state===1&&Number.isFinite(latestEc.microSiemens)?latestEc.microSiemens:null,milliSiemens:latestEc.state===1&&Number.isFinite(latestEc.milliSiemens)?latestEc.milliSiemens:null};
+    const diagnostic=latestEcDiagnostic?.cycle===cycle?latestEcDiagnostic:null;
+    const measurementEc={cycle,diagnostic:diagnostic?.diagnostic??0,range:diagnostic?.range,state:v.getUint8(14),error:v.getUint8(15),detail:v.getUint8(17),model:v.getUint8(16),microSiemens:v.getFloat32(18,true),milliSiemens:v.getFloat32(22,true)};
+    if(measurementEc.state===1&&ch.ecDiagnostic&&!diagnostic){
+      const alreadyWaiting=Boolean(pendingEc);
+      pendingEc=measurementEc;
+      if(!alreadyWaiting)pendingEcTimer=setTimeout(()=>{if(pendingEc){latestEc=pendingEc;pendingEc=null;renderEc();}},1000);
+    }else{clearTimeout(pendingEcTimer);pendingEc=null;latestEc=measurementEc;}
+    const point={cycle,temperature:ptState===1&&Number.isFinite(temperature)?temperature:null,microSiemens:measurementEc.state===1&&Number.isFinite(measurementEc.microSiemens)?measurementEc.microSiemens:null,milliSiemens:measurementEc.state===1&&Number.isFinite(measurementEc.milliSiemens)?measurementEc.milliSiemens:null};
     if(measurementHistory[measurementHistory.length-1]?.cycle===cycle)measurementHistory[measurementHistory.length-1]=point;
     else measurementHistory.push(point);
     if(measurementHistory.length>50)measurementHistory.shift();
@@ -158,8 +180,8 @@ function showMeasurement(value){
   }catch(e){error(e);}
 }
 
-async function connect(){error(null);setConnection('CONNECTING…',false);ui.connect.disabled=true;try{device=await navigator.bluetooth.requestDevice({filters:[{name:'CN0349'}],optionalServices:[UUID.service]});device.addEventListener('gattserverdisconnected',disconnectEvent);const server=await device.gatt.connect(),service=await server.getPrimaryService(UUID.service);for(const [key,id] of Object.entries(UUID))if(key!=='service'&&key!=='advanced')ch[key]=await service.getCharacteristic(id);try{ch.advanced=await service.getCharacteristic(UUID.advanced);ch.advanced.addEventListener('characteristicvaluechanged',e=>{try{renderAdvanced(e.target.value);}catch(problem){error(problem);}});await ch.advanced.startNotifications();renderAdvanced(await ch.advanced.readValue());}catch(e){ch.advanced=null;renderAdvanced(null);}showStatus(await ch.status.readValue());renderSetup(decodeSetup(await ch.setup.readValue()));await readCalibration();showMeasurement(await ch.measurement.readValue());for(const [key,handler] of [['status',e=>showStatus(e.target.value)],['setup',e=>{try{renderSetup(decodeSetup(e.target.value));}catch(problem){error(problem);}}],['setupResult',setupResult],['measurement',e=>showMeasurement(e.target.value)],['controlResult',controlResult]]){await ch[key].startNotifications();ch[key].addEventListener('characteristicvaluechanged',handler);}setConnection('CONNECTED',true);availability();}catch(e){error(e);if(device?.gatt?.connected)device.gatt.disconnect();setConnection('DISCONNECTED',false);}}
-function disconnectEvent(){renderAdvanced(null);setConnection('DISCONNECTED',false);ch={};state=null;busy=false;appliedSetup=null;latestEc=null;measurementHistory=[];ui.ptResult.textContent='—';ui.ecResult.textContent='—';ui.cycle.textContent='Waiting for data...';renderHistory();if(pendingSetup){clearTimeout(pendingSetup.timer);pendingSetup.reject(Error('BLE disconnected'));pendingSetup=null;}if(pendingControl){clearTimeout(pendingControl.timer);pendingControl.reject(Error('BLE disconnected'));pendingControl=null;}availability();}
+async function connect(){error(null);setConnection('CONNECTING…',false);ui.connect.disabled=true;try{device=await navigator.bluetooth.requestDevice({filters:[{name:'CN0349'}],optionalServices:[UUID.service]});device.addEventListener('gattserverdisconnected',disconnectEvent);const server=await device.gatt.connect(),service=await server.getPrimaryService(UUID.service);for(const [key,id] of Object.entries(UUID))if(key!=='service'&&key!=='advanced'&&key!=='ecDiagnostic')ch[key]=await service.getCharacteristic(id);try{ch.advanced=await service.getCharacteristic(UUID.advanced);ch.advanced.addEventListener('characteristicvaluechanged',e=>{try{renderAdvanced(e.target.value);}catch(problem){error(problem);}});await ch.advanced.startNotifications();renderAdvanced(await ch.advanced.readValue());}catch(e){ch.advanced=null;renderAdvanced(null);}try{ch.ecDiagnostic=await service.getCharacteristic(UUID.ecDiagnostic);ch.ecDiagnostic.addEventListener('characteristicvaluechanged',e=>showEcDiagnostic(e.target.value));await ch.ecDiagnostic.startNotifications();showEcDiagnostic(await ch.ecDiagnostic.readValue());}catch(_){ch.ecDiagnostic=null;latestEcDiagnostic=null;}showStatus(await ch.status.readValue());renderSetup(decodeSetup(await ch.setup.readValue()));await readCalibration();showMeasurement(await ch.measurement.readValue());for(const [key,handler] of [['status',e=>showStatus(e.target.value)],['setup',e=>{try{renderSetup(decodeSetup(e.target.value));}catch(problem){error(problem);}}],['setupResult',setupResult],['measurement',e=>showMeasurement(e.target.value)],['controlResult',controlResult]]){await ch[key].startNotifications();ch[key].addEventListener('characteristicvaluechanged',handler);}setConnection('CONNECTED',true);availability();}catch(e){error(e);if(device?.gatt?.connected)device.gatt.disconnect();setConnection('DISCONNECTED',false);}}
+function disconnectEvent(){clearTimeout(pendingEcTimer);pendingEc=null;renderAdvanced(null);setConnection('DISCONNECTED',false);ch={};state=null;busy=false;appliedSetup=null;latestEc=null;latestEcDiagnostic=null;previousCalibrationCount=null;measurementHistory=[];ui.ecResult.dataset.rangeDiagnostic='';$('#ec-range-recommendation').hidden=true;ui.ptResult.textContent='—';ui.ecResult.textContent='—';ui.cycle.textContent='Waiting for data...';renderHistory();if(pendingSetup){clearTimeout(pendingSetup.timer);pendingSetup.reject(Error('BLE disconnected'));pendingSetup=null;}if(pendingControl){clearTimeout(pendingControl.timer);pendingControl.reject(Error('BLE disconnected'));pendingControl=null;}availability();}
 
 ui.connect.onclick=connect;ui.disconnect.onclick=()=>device?.gatt?.disconnect();ui.form.oninput=pendingLabel;ui.form.onsubmit=applySetup;ui.cancel.onclick=()=>appliedSetup&&renderSetup(appliedSetup);
 ui.ecDisplay.onchange=renderEc;

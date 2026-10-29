@@ -70,3 +70,10 @@ Setup muestra el perfil AD5934 configurado en un panel de solo lectura y lo
 actualiza mediante ADVANCED; no representa una lectura actual de registros. Si
 la caracteristica no esta disponible, muestra los valores como no disponibles.
 La distribucion apila los paneles en pantallas pequenas.
+
+Measurement usa EC_DIAGNOSTIC para colorear el valor EC de la misma medida:
+blanco dentro de rango o con diagnóstico inválido, naranja cerca del límite
+o por debajo, y rojo por encima. LOW por encima sugiere HIGH; HIGH por debajo
+sugiere probar LOW sin garantizar que la medida esté en su intervalo. El valor
+y el diagnóstico se asocian por `cycleId`; si falta el diagnóstico, se muestra
+el valor sin color de diagnóstico tras un segundo.
