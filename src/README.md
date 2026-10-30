@@ -1,25 +1,20 @@
-# Firmware — Hito 2F (2026-10-27)
+# Firmware
 
-## Hito 3A — integración BLE
+El firmware coordina la CN0349 desde ESP32-S3 con Arduino. `main.cpp` crea
+una instancia de AD5934, ADG715, MuxApp, ImpedanceApp, CN0349Manager, Terminal
+y BleApp. Inicializa Serial y Wire, aplica el timeout I²C e inicia controlador,
+terminal y BLE. El `loop()` llama a sus funciones `update()` en ese orden.
 
-`main.cpp` añade una instancia `BleApp` que comparte `CN0349Manager` con
-Terminal. `setup()` inicializa BLE después del instrumento y `loop()` llama
-`ble.update()` sin bloqueos. El módulo solo publica status; no consume ciclos,
-no modifica setup/calibración/medición y no altera Serial. Dependencias:
-NimBLE-Arduino y `src/ble/`. Limitaciones y UUID se documentan allí.
+El controlador comparte la adquisición y el Setup entre terminal y BLE. No
+hay máquinas de adquisición paralelas: Pt100 y EC se secuencian en un ciclo.
+Las solicitudes BLE se procesan en el loop; los callbacks no acceden al I²C.
 
-Propósito: instrumento cooperativo Pt100/EC, preparado para reutilización BLE.
-`main.cpp` crea un solo driver AD5934, ADG715, MuxApp, ImpedanceApp,
-CN0349Manager y Terminal. Inicializa Wire y Serial, sin esperar conexión del
-monitor, y llama `instrument.begin(busReady)` seguido de `terminal.begin()`.
+- [cn0349](cn0349/README.md): aplicación, calibración, Setup y ciclos.
+- [impedance](impedance/README.md): adquisición DFT y recuperación.
+- [mux](mux/README.md): rutas autorizadas e interlock.
+- [temperature](temperature/README.md) y [conductivity](conductivity/README.md):
+  conversiones.
+- [terminal](terminal/README.md) y [ble](ble/README.md): interfaces.
 
-El loop llama `instrument.update()` y `terminal.update()`. El primero progresa
-calibración, adquisición y ciclos; el segundo interpreta comandos y consume
-una vez cada resultado. No hay tareas, delays ni instancias paralelas de I²C.
-Solo main/Terminal conocen Serial. Pines, velocidades y timeout están en
-`include/config.h`. Los drivers locales no cambian en este hito.
-
-Estados públicos: NotInitialized, Calibrating, Idle, Measuring, Stopping y Error.
-Los errores de hardware impiden iniciar medidas; las calibraciones parciales
-permiten las funciones cuyos slots son válidos. Ver [arquitectura y
-API](../docs/architecture.md), [pruebas](../test/hito2f.md) y README de cada módulo.
+Los pines, direcciones y constantes están en [include](../include/README.md).
+El [README principal](../README.md) describe el sistema y sus limitaciones.

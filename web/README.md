@@ -1,87 +1,39 @@
-# WebApp BLE de pruebas — Hito 3A
+# WebApp BLE
 
-## Interfaz BLE
+Interfaz HTML/CSS/JavaScript nativa para el instrumento CN0349. Abrir
+`index.html` en un navegador compatible con Web Bluetooth; si `file://` no
+ofrece la API, servir la carpeta desde `localhost`. Usa el servicio y las
+características descritos en [BLE](../src/ble/README.md). No requiere framework
+ni servidor propio y no reconecta automáticamente.
 
-La web adopta el diseño oscuro del proyecto Spectrometer TCS3448: cabecera de
-conexión, navegación lateral, tarjetas y vistas adaptables a móvil. Measurement
-muestra temperatura PT100 y conductividad EC; Setup mantiene los parámetros,
-la selección de sensores y APPLY/CANCEL; Calibration conserva CAL RUN y la
-tabla de referencias. La lectura y las órdenes siguen usando el protocolo BLE
-actual de CN0349; no se añade un gráfico espectral ni funciones de datos que
-este dispositivo no ofrece.
+## Measurement
 
-Setup permite elegir si la conductividad EC se muestra en µS/cm, mS/cm o ambas
-unidades. Es una preferencia visual local a la página: se aplica inmediatamente
-y no modifica ni envía la configuración del instrumento. Por defecto se muestra
-en µS/cm.
+Muestra la última temperatura Pt100, EC medida y modelo. Si la compensación
+está activa, muestra EC25 o un indicador de indisponibilidad. El color de EC
+procede del diagnóstico del firmware: blanco dentro de rango o inválido,
+naranja cerca del máximo o por debajo y rojo por encima. LOW por encima sugiere
+HIGH; HIGH por debajo sugiere probar LOW sin garantizar que esté en rango. No
+se cambia el rango automáticamente.
 
-En Measurement, la temperatura se muestra como “Temperature with PT100” y la
-conductividad como “Conductivity with” seguida del modelo EC de la última
-medida (o de la configuración confirmada antes de recibir medidas). Cada
-tarjeta muestra únicamente su valor, con unidades en el propio valor cuando
-corresponde; el modelo no se repite junto al valor EC.
+El historial conserva hasta 50 ciclos en memoria. El gráfico usa un eje de
+temperatura y otro compartido por EC y EC25; los puntos inválidos dejan huecos.
+EC25 se muestra cuando la compensación está activa. AUTO ajusta las escalas;
+FIXED usa los límites configurados en Setup. CLEAR vacía el historial visible.
+Los ciclos cancelados no reemplazan las últimas lecturas.
 
-Debajo de los medidores, Measurement dibuja el historial de los últimos 50
-ciclos recibidos. Temperatura y conductividad usan escalas verticales
-independientes; la escala EC usa mS/cm cuando se selecciona esa unidad y µS/cm
-para las otras opciones. Los ciclos cancelados no se añaden al historial y los
-valores fallidos dejan un hueco en la serie correspondiente.
-El selector AUTO/FIXED aparece debajo de la gráfica, alineado a la izquierda.
-AUTO ajusta los ejes a los valores recibidos; los límites de FIXED se configuran
-en Setup para temperatura (°C) y EC (µS/cm). Los límites EC se convierten al
-mostrar la gráfica en mS/cm.
+## Setup y Calibration
 
-MEASUREMENT recibe el último ciclo por notificación. Al confirmar STOP, se
-vuelve a leer MEASUREMENT por BLE para mostrar el último ciclo disponible. Los
-snapshots CANCELLED de la parada no reemplazan los últimos datos mostrados; las
-notificaciones continúan actualizando cada ciclo no cancelado. Los botones se
-habilitan según STATUS/busy; continuo puede estar en READY entre ciclos pero
-mantiene STOP habilitado por `busy=true`.
+Setup edita intervalo, rango, modelo, K, sensores y compensación. APPLY envía
+los cambios conjuntamente y espera confirmación; CANCEL restaura el último
+Setup confirmado. ON requiere Pt100 + EC; una selección incompatible muestra
+un aviso y bloquea APPLY. Alpha admite 0–5 %/°C y la referencia es 25 °C.
 
-El canal CONTROL usa paquetes de cuatro bytes y confirmación correlacionada por
-requestId. No se duplican parsers del Terminal ni cálculos. La página conserva
-file://, Web Bluetooth nativo, desconexión explícita y ausencia de reconexión
-automática, frameworks, servidor, Wi-Fi ni almacenamiento local.
+Advanced Setup presenta el perfil AD5934 configurado como READ ONLY; no muestra
+una lectura actual de registros ni permite editarlo. Las unidades EC y los
+límites de la gráfica son preferencias de la página y no modifican el
+instrumento. Calibration muestra las referencias y permite solicitar CAL RUN.
 
-## Hito 3B
-
-Setup edita sensores, intervalo, rango, K, modelo y compensación. APPLY envía
-los cambios conjuntamente, espera el resultado con ID y vuelve a leer la
-configuración aplicada; CANCEL restaura la última confirmada. Con firmware
-anterior utiliza SETUP y deshabilita los controles de compensación. Una
-notificación de configuración del terminal actualiza el
-formulario. Edición y APPLY permanecen deshabilitados fuera de READY, durante
-APPLY o sin conexión; volver a READY nunca aplica cambios automáticamente.
-
-Abrir `index.html` directamente. La página usa HTML/CSS/JavaScript nativos y
-Web Bluetooth para buscar `CN0349`, conectar al servicio ATLANTES, leer STATUS
-y suscribirse a notificaciones. Se separan conexión, estado, calibraciones,
-ocupación y errores. Una desconexión inesperada actualiza la interfaz; no hay
-reconexión automática.
-
-UUID de servicio: `8d7b0001-6f7a-4f31-9c4d-2b6e6a7f3a10`.
-UUID STATUS: `8d7b0002-6f7a-4f31-9c4d-2b6e6a7f3a10`.
-
-Web Bluetooth depende del navegador y del contexto seguro. Si `file://` no
-expone `navigator.bluetooth`, la página lo indica; para la prueba manual puede
-ser necesario servir `web/` mediante `localhost`. No hay dependencias externas,
-almacenamiento local ni reconexión automática.
-
-Setup muestra el perfil AD5934 configurado en un panel de solo lectura y lo
-actualiza mediante ADVANCED; no representa una lectura actual de registros. Si
-la caracteristica no esta disponible, muestra los valores como no disponibles.
-La distribucion apila los paneles en pantallas pequenas.
-
-Measurement usa EC_DIAGNOSTIC para colorear el valor EC de la misma medida:
-blanco dentro de rango o con diagnóstico inválido, naranja cerca del límite
-o por debajo, y rojo por encima. LOW por encima sugiere HIGH; HIGH por debajo
-sugiere probar LOW sin garantizar que la medida esté en su intervalo. El valor
-y el diagnóstico se asocian por `cycleId`; si falta el diagnóstico, se muestra
-el valor sin color de diagnóstico tras un segundo.
-
-Temperature Compensation permite elegir ON/OFF y alpha entre 0,00 y 5,00
-%/°C, con referencia fija de 25 °C. ON requiere PT100 + EC: una selección
-incompatible muestra un aviso y deshabilita APPLY. Measurement muestra EC25
-como lectura secundaria y como segunda curva en el eje EC cuando está activa;
-los resultados inválidos dejan huecos. EC25 llega del firmware para el mismo
-ciclo y no modifica los colores de diagnóstico de la EC medida.
+Los valores EC, EC25 y el diagnóstico se asocian por `cycleId`; la WebApp no
+recalcula EC25 ni el diagnóstico. Si no llega el diagnóstico, la EC se muestra
+sin color de diagnóstico tras un segundo. Al desconectarse se limpian lecturas
+e historial visibles.

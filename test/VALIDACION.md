@@ -1,3 +1,127 @@
+# ATLANTES CN0349 — Evidencias de validación
+
+Este documento reúne resultados y limitaciones registrados durante el desarrollo.
+Una compilación confirma integración del código, una prueba con dobles comprueba
+el comportamiento simulado y un ensayo físico comprueba únicamente el montaje,
+la versión y las condiciones indicados. Ninguna de ellas demuestra por sí sola
+exactitud metrológica. Los identificadores, comandos y versiones de los
+registros históricos pueden no corresponder al firmware actual.
+
+## Evidencia de software histórica
+
+| Etapa | Registro disponible | Alcance |
+|---|---|---|
+| 1A–1E | Compilaciones ESP32-S3 y pruebas matemáticas preparadas; parte de las pruebas nativas no se ejecutaron por falta de GCC/G++ en aquel entorno | Drivers, DDS, control y secuencias de versiones históricas |
+| 2D | Pruebas Pt100 3/3 y AD5934 11/11 ejecutadas con MSVC/Unity; cuatro grupos host reportados | Matemática pura y dobles; no valida sensores |
+| 2F | Siete grupos host PASS, Pt100 3/3 y AD5934 11/11; compilación ESP32-S3 SUCCESS | Manager, secuencias, errores, terminal y regresiones con Wire simulado |
+| 2G | Pruebas host y compilación ESP32-S3 reportadas; suite host ampliada con un octavo grupo | Modelo AD y regresiones en simulación |
+
+Se retiraron las suites host y Unity durante la consolidación documental. Las
+cifras anteriores son resultados históricos, no una ejecución de la versión
+actual. Los dobles no reproducen la cadena analógica, el sensor, el reloj físico,
+la latencia real ni la precisión metrológica.
+
+## Pruebas físicas históricas
+
+### I²C y adquisición
+
+- Hito 1A: se reportaron ACK en 0x0D y 0x48 y funcionamiento de los comandos
+  generales del terminal. El ACK no identifica el componente ni valida el reloj.
+- Hito 1C: se reportó readback del ADG715 0x12 y 0x81. El readback confirma
+  el registro, no la continuidad eléctrica de los contactos.
+- Hito 1D.1: con firmware 0.4.1 se reportó una adquisición válida a 2 kHz,
+  REAL −3405, IMAG −7513, magnitud 8248,587 y standby final. El intento
+  anterior 0.4.0 había terminado por timeout DFT; no produjo una medida válida.
+- Hitos 2B y posteriores: se reportaron calibraciones electrónicas y medidas
+  con las rutas correspondientes. Su validez depende de la configuración y del
+  montaje de cada sesión.
+
+### Ruta Pt100 — Hito 2C.1
+
+Se registraron ensayos con cargas nominales de 220 Ω y 2,2 kΩ, con referencias
+de multímetro reportadas de 215 Ω y 2150 Ω. Se compararon calibraciones
+HIGH_100R y HIGH_1K. La matriz inicial incluyó cuatro muestras preliminares;
+posteriormente se registró una serie de cinco adquisiciones por combinación.
+Las muestras preliminares y la serie de repetibilidad no deben mezclarse.
+
+Ejemplos preliminares: para 215 Ω, HIGH_1K produjo 220,620987 Ω; para 2150 Ω,
+HIGH_100R produjo 2022,875488 Ω y HIGH_1K 2121,152832 Ω. La diferencia entre
+calibraciones mostró que la repetibilidad no equivale a exactitud absoluta.
+Se conserva la transcripción y sus condiciones en el anexo.
+
+El plan 2D recoge validación matemática de IEC 60751, pero dejaba pendiente una
+comparación física de temperatura con referencia independiente. Los ensayos de
+resistencias y la lectura de una Pt100 no demuestran una precisión de
+temperatura ni compensación de cables.
+
+### Ruta EC — Hito 2E.1
+
+Se documentaron **40 adquisiciones** A–H: cinco por combinación de carga,
+ruta y referencia. Se usaron 220 Ω y 2,2 kΩ nominales, sin medida actual
+de ambas resistencias con multímetro. Perfil reportado: MCLK 1 MHz, 2 kHz,
+Range 1, PGA ×1 y settling 10. Las filas se registraron como COMPLETE/VALID,
+sin error de hardware y con standby verificado.
+
+| Serie | Carga nominal | Ruta / calibración | Media Z aparente (Ω) | Desviación muestral (Ω) |
+|---|---:|---|---:|---:|
+| A | 220 Ω | HIGH / HIGH_100R | 306,459 | 0,059 |
+| B | 220 Ω | HIGH / HIGH_1K | 321,285 | 0,049 |
+| C | 220 Ω | LOW / LOW_1K | 435,105 | 0,015 |
+| D | 220 Ω | LOW / LOW_10K | 442,578 | 0,026 |
+| E | 2,2 kΩ | HIGH / HIGH_100R | 2112,163 | 1,447 |
+| F | 2,2 kΩ | HIGH / HIGH_1K | 2214,809 | 3,423 |
+| G | 2,2 kΩ | LOW / LOW_1K | 2248,125 | 0,138 |
+| H | 2,2 kΩ | LOW / LOW_10K | 2287,046 | 0,311 |
+
+La dispersión relativa máxima reportada fue 0,155 % en F. Las diferencias
+entre rutas y calibraciones fueron mayores que la dispersión dentro de cada
+serie. Comparar con carga nominal + 100 Ω es una hipótesis orientativa, no
+una corrección verificada ni una demostración de exactitud. Se conservan las
+40 filas y las condiciones en el anexo.
+
+### Sonda EC y modelos
+
+El registro 2E.2/2E.3 contiene sesiones exploratorias con agua del grifo y agua
+con sal, junto con tablas y condiciones incompletas. Esas muestras no son
+patrones certificados. El documento combina resultados parciales con apartados
+de ensayos aún pendientes; no debe interpretarse como validación metrológica.
+Se conserva el registro en el anexo.
+
+El plan 2G para el modelo AD enumeraba pruebas físicas con 220 Ω, 2,2 kΩ, agua
+y agua con sal como pendientes en el momento de redactarlo. Las pruebas de un
+hito anterior no prueban automáticamente una versión posterior.
+
+## BLE, WebApp y compensación
+
+El desarrollo posterior incorporó BLE, Setup, calibración, medida, gráfica,
+persistencia, diagnóstico de rango y compensación EC25. Se comunicó el cierre
+funcional de los hitos 3H y 3I, y la revisión de las curvas EC y EC25.
+No se dispone aquí de una matriz detallada de resultados o de referencias
+metrológicas para esas validaciones. El cierre funcional no acredita
+incertidumbre, exactitud ni calibración de la sonda.
+
+## Limitaciones y pruebas pendientes de documentar
+
+- Contrastar esquema de fabricación, conexiones, rutas analógicas y efecto de
+  R2 en la placa concreta; los esquemas disponibles son simplificados.
+- Caracterizar Pt100 y cables con una referencia térmica independiente.
+- Medir soluciones patrón trazables y caracterizar K, repetibilidad, estabilidad,
+  exactitud y compensación térmica para la sonda y el líquido usados.
+- No interpretar el diagnóstico de rango DFT como detección física de
+  saturación del ADC.
+- Al documentar una nueva prueba, anotar firmware/commit, placa, fecha,
+  conexiones, patrones, temperatura, configuración, resultado y criterio.
+
+## Anexos: registros originales de banco
+
+Los siguientes anexos conservan el contenido de tres registros históricos,
+incluidos resultados crudos, planes y observaciones de su momento. Sus
+referencias cruzadas y comandos describen aquella versión y pueden estar
+obsoletos. Las secciones de planes no son evidencia de ejecución.
+
+### Registro original: hito2c.1_testing.md
+
+````text
 # Hito 2C.1 — Prueba paso a paso desde el arranque
 
 **Objetivo:** hacer cinco medidas con cada calibración para cada resistencia.
@@ -2115,3 +2239,186 @@ contribuciones ni afirmar la temperatura del sensor. Hace falta confirmar el
 esquema de colores/conductores, la resistencia de cables y una referencia térmica
 si se desea validar la conversión a temperatura. No aplicar compensación de
 cables ni correcciones empíricas con una sola muestra.
+````
+
+### Registro original: hito2e1.md
+
+````text
+# Hito 2E.1 — Caracterización eléctrica EC
+
+## Configuración y resultados
+
+Las series A–D usan una resistencia externa de **220 Ω nominales** y las series E–H una de **2,2 kΩ nominales**. La ruta EC del CN0349 incluye **R2 = 100 Ω en serie** con la carga externa. No consta una medida actual de estas resistencias con multímetro. Todas las filas registradas terminaron en `COMPLETE / VALID / NONE`, sin error de hardware y con standby verificado. Frecuencia solicitada: 2000 Hz; efectiva: 1999.996582 Hz; efectiva de calibración: 1999.996460 Hz. MCLK externo: 1 MHz; Range 1; PGA ×1; settling: 10 ciclos.
+
+| Serie | Resistencia nominal | Ruta EC | RFB | Calibración | ID | GF | Muestras |
+| --- | ---: | --- | ---: | --- | ---: | ---: | ---: |
+| A | 220 Ω | HIGH `0x81` | 100 Ω | `CAL_HIGH_100R` | 1 | 0.000001221432 | 5/5 |
+| B | 220 Ω | HIGH `0x81` | 100 Ω | `CAL_HIGH_1K` | 2 | 0.000001164789 | 5/5 |
+| C | 220 Ω | LOW `0x82` | 1000 Ω | `CAL_LOW_1K` | 3 | 0.000000121298 | 5/5 |
+| D | 220 Ω | LOW `0x82` | 1000 Ω | `CAL_LOW_10K` | 4 | 0.000000119253 | 5/5 |
+| E | 2,2 kΩ | HIGH `0x81` | 100 Ω | `CAL_HIGH_100R` | 1 | 0.000001221432 | 5/5 |
+| F | 2,2 kΩ | HIGH `0x81` | 100 Ω | `CAL_HIGH_1K` | 2 | 0.000001164789 | 5/5 |
+| G | 2,2 kΩ | LOW `0x82` | 1000 Ω | `CAL_LOW_1K` | 3 | 0.000000121298 | 5/5 |
+| H | 2,2 kΩ | LOW `0x82` | 1000 Ω | `CAL_LOW_10K` | 4 | 0.000000119253 | 5/5 |
+
+| Medida | REAL | IMAG | Magnitud DFT | Fase corregida (°) | Impedancia aparente (Ω) | Tiempo total (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A1 | -1102 | -2433 | 2670.934814 | +0.128235 | 306.526031 | 229 |
+| A2 | -1101 | -2434 | 2671.433594 | +0.156624 | 306.468781 | 217 |
+| A3 | -1101 | -2434 | 2671.433594 | +0.156624 | 306.468781 | 217 |
+| A4 | -1101 | -2435 | 2672.344727 | +0.165459 | 306.364319 | 213 |
+| A5 | -1101 | -2434 | 2671.433594 | +0.156624 | 306.468781 | 213 |
+| B1 | -1101 | -2434 | 2671.433594 | +0.452705 | 321.372192 | 213 |
+| B2 | -1101 | -2435 | 2672.344727 | +0.461540 | 321.262634 | 217 |
+| B3 | -1101 | -2435 | 2672.344727 | +0.461540 | 321.262634 | 213 |
+| B4 | -1101 | -2435 | 2672.344727 | +0.461540 | 321.262634 | 213 |
+| B5 | -1101 | -2435 | 2672.344727 | +0.461540 | 321.262634 | 213 |
+| C1 | -7801 | -17268 | 18948.335938 | +0.209801 | 435.086731 | 229 |
+| C2 | -7799 | -17268 | 18947.511719 | +0.215309 | 435.105682 | 213 |
+| C3 | -7800 | -17268 | 18947.923828 | +0.212555 | 435.096191 | 213 |
+| C4 | -7799 | -17267 | 18946.601563 | +0.214066 | 435.126556 | 213 |
+| C5 | -7801 | -17267 | 18947.423828 | +0.208549 | 435.107666 | 217 |
+| D1 | -7800 | -17268 | 18947.923828 | +0.526443 | 442.555023 | 217 |
+| D2 | -7798 | -17266 | 18945.277344 | +0.529465 | 442.616882 | 213 |
+| D3 | -7800 | -17268 | 18947.923828 | +0.526443 | 442.555023 | 217 |
+| D4 | -7799 | -17267 | 18946.601563 | +0.527954 | 442.585937 | 217 |
+| D5 | -7800 | -17267 | 18947.011719 | +0.525200 | 442.576324 | 217 |
+| E1 | -164 | -351 | 387.423553 | -0.547844 | 2113.219727 | 225 |
+| E2 | -164 | -351 | 387.423553 | -0.547844 | 2113.219727 | 213 |
+| E3 | -164 | -351 | 387.423553 | -0.547844 | 2113.219727 | 213 |
+| E4 | -163 | -352 | 387.908508 | -0.351501 | 2110.577637 | 217 |
+| E5 | -163 | -352 | 387.908508 | -0.351501 | 2110.577637 | 217 |
+| F1 | -163 | -351 | 387.001282 | -0.117630 | 2218.402344 | 217 |
+| F2 | -163 | -352 | 387.908508 | -0.055420 | 2213.214111 | 213 |
+| F3 | -163 | -351 | 387.001282 | -0.117630 | 2218.402344 | 218 |
+| F4 | -164 | -352 | 388.329742 | -0.189308 | 2210.813232 | 213 |
+| F5 | -163 | -352 | 387.908508 | -0.055420 | 2213.214111 | 218 |
+| G1 | -1509 | -3342 | 3666.885010 | +0.220955 | 2248.275879 | 230 |
+| G2 | -1510 | -3342 | 3667.296631 | +0.206718 | 2248.023682 | 213 |
+| G3 | -1510 | -3342 | 3667.296631 | +0.206718 | 2248.023682 | 217 |
+| G4 | -1510 | -3342 | 3667.296631 | +0.206718 | 2248.023682 | 217 |
+| G5 | -1509 | -3342 | 3666.885010 | +0.220955 | 2248.275879 | 213 |
+| H1 | -1509 | -3342 | 3666.885010 | +0.534843 | 2286.818115 | 217 |
+| H2 | -1509 | -3341 | 3665.973633 | +0.528412 | 2287.386719 | 217 |
+| H3 | -1509 | -3342 | 3666.885010 | +0.534843 | 2286.818115 | 213 |
+| H4 | -1509 | -3342 | 3666.885010 | +0.534843 | 2286.818115 | 213 |
+| H5 | -1509 | -3341 | 3665.973633 | +0.528412 | 2287.386719 | 213 |
+
+## Resumen y conclusión
+
+| Serie | Impedancia media (Ω) | Desviación estándar muestral (Ω) | Diferencia frente a nominal externo + 100 Ω* |
+| --- | ---: | ---: | ---: |
+| A | 306.459 | 0.059 | −4.23 % |
+| B | 321.285 | 0.049 | +0.40 % |
+| C | 435.105 | 0.015 | +35.97 % |
+| D | 442.578 | 0.026 | +38.31 % |
+| E | 2112.163 | 1.447 | −8.17 % |
+| F | 2214.809 | 3.423 | −3.70 % |
+| G | 2248.125 | 0.138 | −2.26 % |
+| H | 2287.046 | 0.311 | −0.56 % |
+
+*Comparación orientativa con **320 Ω** para A–D y **2300 Ω** para E–H, suponiendo que R2 interviene como una suma resistiva ideal en ambas rutas; no es una corrección aplicada a las medidas.*
+
+Las cinco lecturas de cada serie son repetibles: la dispersión relativa máxima es **0.155 %** (F). Considerar R2 explica parte de la diferencia frente a la resistencia externa nominal: B queda a **+0.40 %** de 320 Ω y H a **−0.56 %** de 2300 Ω bajo el modelo simple. Sin embargo, las diferencias entre rutas y calibraciones son mucho mayores que la dispersión dentro de una serie: con la misma carga externa de 220 Ω nominales, las medias van de **306.459 Ω (A)** a **442.578 Ω (D)**; con 2,2 kΩ nominales, de **2112.163 Ω (E)** a **2287.046 Ω (H)**. Cambiar solo la calibración de E a F desplaza la media **102.646 Ω**. R2 no explica por sí sola estos cambios entre series. Los datos demuestran repetibilidad de la adquisición, pero todavía no validan la exactitud absoluta de la resistencia externa.
+
+## Estado de la matriz
+
+Las **40 adquisiciones** previstas de la matriz A–H están registradas: cinco por cada combinación de resistencia nominal, ruta EC y calibración.
+
+La impedancia indicada es la del circuito aparente (`1 / (GF × magnitud DFT)`); **no se ha restado R2** ni aplicado constante de celda, cálculo de conductividad o compensación térmica. La fase corregida solo compensa el instrumento. Para estimar la resistencia externa a partir de la impedancia aparente habrá que medir el patrón real y verificar cómo interviene R2 en la transferencia eléctrica de ambas rutas antes de aplicar una sustracción de 100 Ω o ajustar la conversión.
+````
+
+### Registro original: hito2e2.md
+
+````text
+# Hitos 2E.2 y 2E.3 — Sonda EC real y conductividad estimada
+
+## Alcance y configuración
+
+La sonda EC de constante de celda nominal **K = 1 cm⁻¹** se conecta a J1 Yx-1/Yx-2 con el equipo apagado. El firmware registra impedancia aparente y calcula una **conductividad estimada, no calibrada**, mediante `1e6 × K / |Z aparente|` en µS/cm. El modo activo es RAW: no resta R2 de 100 Ω. La fase instrumental y la naturaleza compleja de la impedancia impiden tratar esta cifra como una conductividad absoluta validada. El hito 2E.4 queda reservado para soluciones patrón y validación metrológica.
+
+Parámetros iniciales: **2000 Hz**, MCLK externo **1 MHz**, Range 1 (**2 Vpp nominales**), PGA ×1 y settling de 10 ciclos ×1. La salida nominal del AD5934 **no garantiza** esa tensión en los electrodos: el acoplamiento, los amplificadores y la impedancia de la sonda alteran la señal real. No hay detección fiable de saturación analógica, autorange ni barrido.
+
+| Ruta | Máscara | RFB | Calibraciones compatibles |
+| --- | --- | ---: | --- |
+| HIGH | `0x81` | 100 Ω | `CAL_HIGH_100R`, `CAL_HIGH_1K` |
+| LOW | `0x82` | 1000 Ω | `CAL_LOW_1K`, `CAL_LOW_10K` |
+
+Seleccionar ruta y calibración de forma explícita y comprobar `cn0349 ec config` y `cn0349 conductivity config` antes de cada serie. `cn0349 conductivity start` reutiliza la adquisición EC no bloqueante; `cn0349 conductivity status` y `cn0349 conductivity result` permiten revisar estado, configuración congelada, DFT y estimación. `cn0349 conductivity stop` cancela una adquisición activa. `cn0349 ec start` sigue disponible cuando solo interesa la impedancia. Si `start` rechaza una combinación o la muestra falla, corregir la configuración o la causa del error antes de repetirla; no contar un resultado anterior como una adquisición nueva.
+
+## Caracterización cualitativa 2E.2/2E.3
+
+Estas muestras **no son patrones de conductividad** y no tienen un valor asignado en µS/cm. Usar recipientes limpios y seguros; no utilizar líquidos peligrosos ni incompatibles con la sonda. Comenzar por las muestras menos salinas y añadir la sal en pequeñas cantidades.
+
+| ID | Muestra | Preparación cualitativa |
+| --- | --- | --- |
+| A | Agua de baja mineralización | Sin adición de sal |
+| B | Agua del grifo | Sin adición de sal |
+| C | Agua con sal | Anotar origen del agua y cantidad de sal añadida; datos de esta sesión pendientes |
+| D (opcional, 2E.4) | Agua del grifo con más sal | Aumentar la cantidad respecto de C, sin concentración excesiva |
+
+Para cada muestra:
+
+1. Enjuagar la sonda con agua de baja mineralización; evitar arrastrar líquido de la muestra anterior.
+2. Sumergir los electrodos a la misma profundidad, sin burbujas y sin tocar paredes o fondo. Mantener el mismo recipiente o una geometría equivalente.
+3. Medir la temperatura de la muestra con el multímetro y esperar a que la lectura se estabilice. Anotar también la duración aproximada de esta espera.
+4. Comprobar con `cn0349 ec config` la ruta, RFB y calibración elegidos. Ejecutar cinco veces `cn0349 conductivity start`, esperando el fin de cada adquisición y consultando `cn0349 conductivity result`. Registrar solo resultados nuevos `COMPLETE / VALID / NONE` con standby verificado; conservar aparte el diagnóstico de cualquier fallo mientras se resuelve.
+5. Registrar la estimación en µS/cm y mS/cm junto al DFT y Z aparente. Si la señal DFT es muy pequeña, el estado informa un error o hay sospecha de saturación, detener la serie y seleccionar **manualmente** otra combinación compatible. Registrar el cambio como otra serie; no asumir que HIGH/LOW designan directamente una clase de conductividad.
+6. Cuando sea eléctricamente adecuado, repetir cinco adquisiciones con la otra ruta o calibración compatible. Mantener temperatura, inmersión y tiempo de espera comparables. Anotar si aparece deriva entre la primera y quinta lectura.
+
+## Registro de resultados
+
+Completar una fila por serie de cinco adquisiciones válidas. Conservar por cada lectura REAL, IMAG, magnitud DFT, fase DFT, fase corregida, impedancia aparente, conductividad estimada, estado, error y tiempo; la ruta, máscara, RFB, calibración, ID, GF, frecuencia efectiva, excitación, PGA, modelo RAW, K nominal, R2 nominal, temperatura externa, fecha o identificador de sesión y condiciones de inmersión pertenecen al encabezado de esa serie. Los valores se copian de `conductivity result` y no se tratan como conductividad calibrada. El snapshot actual vive en RAM y conserva la configuración de la adquisición; estas tablas permiten archivar las lecturas para la futura WebApp BLE, sin implementar aún almacenamiento persistente.
+
+| Sesión | Muestra / descripción | Temperatura multímetro (°C) | Ruta / máscara / RFB | Calibración / ID / GF | Frecuencia efectiva (Hz) | Observaciones |
+| --- | --- | ---: | --- | --- | ---: | --- |
+| Pendiente | A / agua de baja mineralización | — | — | — | — | — |
+| Sesión grifo 1 | B / agua del grifo | Pendiente | LOW `0x82` / 1000 Ω | `CAL_LOW_1K` / ID 3 / GF 0.000000121290 | 1999.996582 | K nominal 1 cm⁻¹; RAW; R2 nominal 100 Ω; inmersión y temperatura sin documentar |
+| Sesión sal 1 | C / agua del grifo con sal; cantidad sin documentar | Pendiente | LOW `0x82` / 1000 Ω | `CAL_LOW_1K` / ID 3 / GF 0.000000121290 | 1999.996582 | K nominal 1 cm⁻¹; RAW; R2 nominal 100 Ω; inmersión y temperatura sin documentar |
+| Pendiente | D / agua del grifo con más sal | — | — | — | — | — |
+
+| Muestra / serie | Lectura | REAL | IMAG | Magnitud DFT | Fase DFT (°) | Fase corregida (°) | Z aparente (Ω) | EC estimada (µS/cm) | Estado / error | Tiempo (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
+| B / grifo 1 | 1 | -2131 | -3566 | 4154.216797 | -120.862045 | -6.322502 | 1984.658813 | 503.864929 | COMPLETE / NONE | 229 |
+| C / sal 1 | 1 | -13563 | -14768 | 20051.154297 | -132.564514 | -18.024971 | 411.183441 | 2432.004639 | COMPLETE / NONE | 223 |
+
+Las primeras adquisiciones B1 y C1 fueron `VALID`, sin error de hardware y con standby verificado. Con la misma ruta y calibración, la muestra salada muestra menor Z aparente (**411.183441 Ω** frente a **1984.658813 Ω**) y mayor conductividad RAW estimada (**2432.004639** frente a **503.864929 µS/cm**). La fase corregida también cambia de **−6.322502°** a **−18.024971°**; no puede atribuirse exclusivamente a los electrodos. No constan temperatura, cantidad de sal ni repeticiones suficientes para evaluar repetibilidad o exactitud.
+
+Al cerrar cada serie, calcular media y desviación estándar muestral de Z, coeficiente de variación (`100 × desviación/media`), mínimo, máximo y variación de fase corregida; registrar las condiciones de estabilidad. Comparar si Z tiende a disminuir al aumentar la sal, la dispersión y deriva de cada muestra, las diferencias entre HIGH y LOW y el efecto de elegir otro GF con la misma ruta. Anotar combinaciones que produzcan señal DFT pequeña, error o posible saturación, sin inventar un umbral de saturación no validado. Una fase cambiante puede incluir polarización de electrodos, deriva térmica y efectos de la electrónica; la corrección instrumental de fase aún no valida la fase física de la celda.
+
+### Comparación de rutas y repetibilidad
+
+Usar solo combinaciones con señal utilizable: HIGH + `CAL_HIGH_100R`, HIGH + `CAL_HIGH_1K`, LOW + `CAL_LOW_1K` y LOW + `CAL_LOW_10K`. No asumir que mayor magnitud DFT significa mayor exactitud.
+
+| Muestra / sesión | Ruta y calibración | n | Media Z (Ω) | s muestral (Ω) | CV (%) | Z mín.–máx. (Ω) | Fase mín.–máx. (°) | Observaciones |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |
+| Pendiente | — | — | — | — | — | — | — | — |
+
+### Estabilidad temporal (reservado para 2E.4)
+
+Con la sonda inmóvil en una muestra, hacer **diez adquisiciones espaciadas manualmente**. Registrar el tiempo relativo de cada una y mantener ruta, calibración, profundidad y temperatura lo más constantes posible. La secuencia sirve para detectar deriva; no requiere un temporizador nuevo en el firmware.
+
+| Muestra / sesión | Ruta y calibración | Lectura 1–10 | Tiempo relativo (s) | Temperatura (°C) | Magnitud DFT | Z aparente (Ω) | Fase corregida (°) | Observación |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Pendiente | — | — | — | — | — | — | — | — |
+
+## Soluciones patrón (reservadas para 2E.4)
+
+En el futuro 2E.4, si se dispone de soluciones comerciales, preferir **84 µS/cm**, **1413 µS/cm** y **12,88 mS/cm**. Registrar fabricante, identificación, conductividad nominal, temperatura de referencia, tolerancia declarada y vigencia. Medir la temperatura real con el multímetro y repetir cinco adquisiciones con inmersión, espera y configuración documentadas. No comparar directamente una conductividad certificada a 25 °C con una medida a otra temperatura sin considerar la dependencia térmica del patrón. No ajustar K ni los GF con las lecturas actuales.
+
+| Patrón / lote / sesión | Nominal y unidad | T ref. (°C) | T real (°C) | Tolerancia | Ruta / calibración | n | Media Z (Ω) | s (Ω) | Fase media (°) | Observaciones |
+| --- | --- | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | --- |
+| Pendiente | — | — | — | — | — | — | — | — | — | — |
+
+Comparar la **tendencia eléctrica** y la dispersión entre rutas y calibraciones; la conductividad estimada por RAW no equivale a una conductividad calibrada ni permite deducir una constante de celda efectiva o una corrección automática a partir de este hito. Dejar explícito cuando no se disponga de patrones; 2E.4 no se declara ejecutado por preparar este protocolo.
+
+## Limitaciones observadas
+
+| Muestra / configuración | Señal DFT pequeña, error o sospecha de saturación | Deriva / fase / temperatura | Acción y resultado |
+| --- | --- | --- | --- |
+| Pendiente | — | — | — |
+
+## Estado de validación
+
+El firmware reutiliza los comandos EC existentes y conserva los snapshots por adquisición. Las pruebas host verifican compatibilidad de calibración, errores, standby, configuración conservada, cálculo RAW y regresión de Pt100/temperatura; **no simulan** la sonda ni el líquido. La compilación del ESP32-S3 finaliza correctamente; las primeras adquisiciones físicas con la sonda real siguen pendientes. La exactitud absoluta, la constante de celda efectiva, la sustracción de R2 y la compensación térmica quedan pendientes de validación metrológica en 2E.4.
+````

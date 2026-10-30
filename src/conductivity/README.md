@@ -1,29 +1,27 @@
-# Módulo Conductivity — Hito 2E.3
+# Conductivity
 
-## Hito 2G — ANALOG_DEVICES
+`Conductivity.h` contiene conversiones puras sin Arduino, I²C ni acceso a
+hardware. `Result` conserva modelo, valores, validez y código `Error`.
 
-`AdCalibration`, `calibrateAnalogDevices` y `convertAnalogDevices` son
-funciones puras. Separan el Gain Factor legacy de la pendiente AD e implementan
-las ecuaciones 1–4 de CN-0349 Rev. A con `double`. Devuelven ID, NX, GF, NOS,
-YX, YCELL, denominador, K, unidades y error. K sigue nominal y no hay patrón
-certificado, compensación térmica o validación física.
+## Modelos e interfaces
 
-`Conductivity.h` es una conversión pura, sin I²C ni acceso a AD5934/ADG715.
-Recibe impedancia aparente, K nominal, modelo y R2 nominal; devuelve
-resistencia de celda estimada, µS/cm, mS/cm, validez y error explícito.
+- `convert(apparentImpedanceOhms, nominalKPerCm, model, r2Ohms)` recibe
+  impedancia aparente en Ω, K en cm⁻¹ y R2 en Ω. Para RAW usa la impedancia
+  como resistencia estimada; SERIES usa impedancia menos R2. Devuelve EC en
+  µS/cm y mS/cm, o un error si las entradas o resultados no son válidos.
+- `calibrateAnalogDevices(nLow, nHigh, yLowSiemens, yHighSiemens, rfbOhms,
+  frequencyHz, excitationRange, pgaGain, calibrationId)` calcula GF y NOS a
+  partir de dos referencias y devuelve `AdCalibration` con validez/error.
+- `convertAnalogDevices(magnitudeCode, nominalKPerCm, r2Ohms, calibration,
+  measurementFrequencyHz, expectedRfbOhms, excitationRange, pgaGain)` usa la
+  magnitud DFT y la calibración AD, comprueba compatibilidad y devuelve EC y
+  los valores intermedios de admitancia.
 
-En RAW: `R_estimada = Z_aparente`. En el modelo matemático
-SERIES_R2_EXPERIMENTAL: `R_estimada = Z_aparente − R2`. Después:
-`µS/cm = 10⁶ × K / R_estimada` y `mS/cm = (µS/cm) / 1000`. Se comprueban
-entradas finitas, K y resistencia positivas y resultados representables. El
-modelo serie puede probarse matemáticamente, pero **no está habilitado en el
-Manager** porque la equivalencia eléctrica de R2 en la placa concreta no está
-verificada. Los valores configurados están en `include/config.h`:
-K nominal = 1 cm⁻¹ y R2 nominal = 100 Ω.
+RAW, SERIES y AD se pueden seleccionar desde el controlador. SERIES es un
+modelo experimental: la transferencia real y el efecto de R2 requieren
+caracterización. K y R2 iniciales son nominales. La impedancia aparente no
+demuestra exactitud de una celda real. EC25 se calcula después, en el
+controlador, y no modifica estas fórmulas.
 
-La conversión toma la magnitud de impedancia como aproximación resistiva. Una
-celda real puede tener fase y `|Z| ≠ Re(Z)`; la estimación no equivale a una
-conductividad calibrada ni está compensada a 25 °C. El Manager conserva en su
-snapshot el resultado EC original y el modelo aplicado; cambiar después ruta,
-calibración o modelo no reinterpreta adquisiciones anteriores. La futura BLE
-podrá transportar el snapshot, pero no forma parte de este módulo.
+Las funciones y tipos públicos de `Conductivity.h` forman parte de la
+referencia HTML generada con `doxygen Doxyfile` desde la raíz del proyecto.

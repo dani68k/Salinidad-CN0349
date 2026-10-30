@@ -1,8 +1,12 @@
-# BLE GATT — Hito 3A
+# BLE GATT
 
-## Hito 3D — control y resultados
+BleApp comparte CN0349Manager con Terminal. `begin()` crea el servicio y el
+advertising; `update()` procesa solicitudes y publica snapshots. Los callbacks
+encolan órdenes sin acceder al bus I²C. Dependencias: CN0349Manager y
+NimBLE-Arduino 2.x. El nombre anunciado es `CN0349` y el servicio ATLANTES es
+`8d7b0001-6f7a-4f31-9c4d-2b6e6a7f3a10`.
 
-Se añaden tres características al servicio ATLANTES:
+## Control y resultados
 
 - MEASUREMENT `8d7b0007-6f7a-4f31-9c4d-2b6e6a7f3a10`: READ + NOTIFY, 26 bytes.
 - CONTROL_COMMAND `8d7b0008-6f7a-4f31-9c4d-2b6e6a7f3a10`: WRITE, 4 bytes.
@@ -26,7 +30,7 @@ al serializar; no se copian bytes parciales de la representación double.
 BLE consulta el snapshot mediante `getMeasurementResult()` y
 `publishedCycles`; no consume ni compite con el slot usado por Terminal.
 
-## Hito 3C.1 — lectura de calibraciones
+## Lectura de calibraciones
 
 CALIBRATION `8d7b0006-6f7a-4f31-9c4d-2b6e6a7f3a10` es READ y contiene un
 registro binario fijo de 76 bytes, little-endian. Las lecturas largas GATT se
@@ -54,9 +58,9 @@ sesión terminada y actualiza la característica. ABSENT/INVALID informan
 explícitamente que no existe una calibración utilizable. La característica no
 notifica y no inicia calibraciones.
 
-## Hito 3B — protocolo Setup
+## Protocolo Setup
 
-Se mantienen nombre, servicio y UUID de 3A. Nuevas características:
+Características:
 
 - SETUP `8d7b0003-6f7a-4f31-9c4d-2b6e6a7f3a10`: READ + NOTIFY, 12 bytes.
 - SETUP_COMMAND `8d7b0004-6f7a-4f31-9c4d-2b6e6a7f3a10`: WRITE, 13 bytes.
@@ -92,8 +96,10 @@ NotInitialized se publica como INIT, Calibrating como CALIBRATING, Idle listo
 como READY, Measuring/Stopping como MEASURING y cualquier error/no readiness
 como ERROR. NimBLE reanuda advertising al desconectar.
 
-Dependencias: CN0349Manager y NimBLE-Arduino 2.x. Limitaciones 3A: sin escritura,
-órdenes, seguridad, bonding, reconexión de cliente, medidas ni configuración BLE.
+No se implementan bonding ni reconexión automática del cliente.
+
+La interfaz pública de `BleApp` y los identificadores, tamaños y códigos de
+`AtlantesBle` forman parte de la referencia HTML generada con `doxygen Doxyfile`.
 
 Al desconectarse el último central, el callback descarta las órdenes de control
 BLE pendientes y solicita una parada. `update()` ejecuta `stopMeasurement()`

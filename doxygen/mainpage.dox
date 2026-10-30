@@ -1,0 +1,18 @@
+/**
+ * @mainpage Referencia técnica del firmware ATLANTES CN0349
+ *
+ * Esta referencia complementa el README principal del proyecto. Documenta
+ * las interfaces y tipos públicos de CN0349Manager, ImpedanceApp, MuxApp,
+ * Pt100, Conductivity, los drivers AD5934 y ADG715, BLE, Terminal y las
+ * cabeceras compartidas de configuración, matemática y diagnóstico.
+ *
+ * El controlador coordina Setup, calibración electrónica y ciclos de medida
+ * Pt100/EC. Terminal y BLE comparten su API. La adquisición progresa en el
+ * loop mediante CN0349Manager::update().
+ *
+ * Para consultar las interfaces, abrir la lista de clases o la documentación
+ * de los archivos de los módulos. Las páginas de clase incluyen diagramas de
+ * relaciones y las páginas de archivo muestran dependencias entre cabeceras.
+ * Los demás módulos se incorporarán en etapas posteriores; su ausencia en esta
+ * generación no implica que no existan.
+ */

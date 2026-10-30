@@ -1,56 +1,86 @@
 #pragma once
+/** @file Conductivity.h
+ * @brief Calibración AD y conversiones puras de conductividad EC.
+ */
 
 #include <math.h>
 #include <stdint.h>
 
+/** @brief Modelos de conversión EC, sin adquisición ni acceso al hardware.
+ * @details Los valores se estiman con la configuración y calibración dadas;
+ * su validez numérica no demuestra exactitud metrológica de la celda.
+ */
 namespace Conductivity {
 
+/** @brief Modelo de EC: RAW, SERIES experimental o AnalogDevices de dos puntos. */
 enum class Model { Raw, SeriesR2Experimental, AnalogDevices };
+/** @brief Estado o motivo de fallo de una conversión EC. */
 enum class Error { None, NotRun, InvalidModel, InvalidImpedance, InvalidCellConstant, InvalidR2,
   NonPositiveCellResistance, Overflow, CalibrationInvalid, CalibrationMismatch,
   InvalidMagnitude, NonPositiveAdmittance, InvalidDenominator };
 
+/** @brief Estado o motivo de fallo de la calibración AD de dos puntos. */
 enum class AdCalibrationError { None, NotRun, InvalidPoint, NonIncreasingCodes, SpanTooSmall,
   InvalidGainFactor, InvalidOffset, ConfigurationMismatch };
 
+/** @brief Calibración AD de dos puntos y metadatos de compatibilidad.
+ * @note calibrateAnalogDevices() inicializa la frecuencia efectiva con la
+ * solicitada; el controlador puede completarla con la frecuencia DDS efectiva.
+ */
 struct AdCalibration {
-  bool valid = false;
-  AdCalibrationError error = AdCalibrationError::NotRun;
-  double nLow = 0;
-  double nHigh = 0;
-  double yLowSiemens = 0;
-  double yHighSiemens = 0;
-  double gainFactorSiemensPerCode = 0;
-  double systemOffsetCode = 0;
-  double rfbOhms = 0;
-  double frequencyHz = 0;
-  double effectiveFrequencyHz = 0;
-  double mclkHz = 0;
-  uint16_t settlingCycles = 0;
-  uint8_t excitationRange = 0;
-  uint8_t pgaGain = 0;
-  uint32_t calibrationId = 0;
+  bool valid = false; ///< Indica que la calibración es utilizable.
+  AdCalibrationError error = AdCalibrationError::NotRun; ///< Estado o motivo de fallo.
+  double nLow = 0; ///< Magnitud DFT de la referencia de menor admitancia.
+  double nHigh = 0; ///< Magnitud DFT de la referencia de mayor admitancia.
+  double yLowSiemens = 0; ///< Admitancia de la referencia inferior, en S.
+  double yHighSiemens = 0; ///< Admitancia de la referencia superior, en S.
+  double gainFactorSiemensPerCode = 0; ///< Pendiente GF, en S/código DFT.
+  double systemOffsetCode = 0; ///< Offset NOS, en códigos DFT.
+  double rfbOhms = 0; ///< Realimentación nominal, en Ω.
+  double frequencyHz = 0; ///< Frecuencia solicitada, en Hz.
+  double effectiveFrequencyHz = 0; ///< Frecuencia DDS efectiva, en Hz.
+  double mclkHz = 0; ///< MCLK configurado, en Hz; completado por el controlador.
+  uint16_t settlingCycles = 0; ///< Ciclos de asentamiento; completados por el controlador.
+  uint8_t excitationRange = 0; ///< Rango de excitación configurado.
+  uint8_t pgaGain = 0; ///< Ganancia PGA configurada.
+  uint32_t calibrationId = 0; ///< Identificador de la calibración.
 };
 
+/** @brief Conductividad estimada, estado y valores intermedios de conversión.
+ * @note Los campos específicos de un modelo no describen necesariamente los
+ * valores de los demás modelos. La compensación EC25 se realiza fuera de este módulo.
+ */
 struct Result {
-  bool valid = false;
-  Error error = Error::NotRun;
-  Model model = Model::Raw;
-  float apparentImpedanceOhms = 0;
-  float r2Ohms = 0;
-  float cellResistanceOhms = 0;
-  float nominalKPerCm = 0;
-  float microSiemensPerCm = 0;
-  float milliSiemensPerCm = 0;
-  uint32_t calibrationId = 0;
-  double magnitudeCode = 0;
-  double gainFactorSiemensPerCode = 0;
-  double systemOffsetCode = 0;
-  double measuredAdmittanceSiemens = 0;
-  double cellAdmittanceSiemens = 0;
-  double r2Denominator = 0;
+  bool valid = false; ///< Indica conversión válida.
+  Error error = Error::NotRun; ///< Estado o motivo de fallo.
+  Model model = Model::Raw; ///< Modelo de conversión.
+  float apparentImpedanceOhms = 0; ///< Impedancia aparente de entrada, en Ω, para RAW/SERIES.
+  float r2Ohms = 0; ///< Resistencia R2 utilizada, en Ω.
+  float cellResistanceOhms = 0; ///< Resistencia de celda estimada, en Ω.
+  float nominalKPerCm = 0; ///< Constante de celda utilizada, en cm⁻¹.
+  float microSiemensPerCm = 0; ///< Conductividad estimada, en µS/cm.
+  float milliSiemensPerCm = 0; ///< Conductividad estimada, en mS/cm.
+  uint32_t calibrationId = 0; ///< Identificador de calibración AD.
+  double magnitudeCode = 0; ///< Magnitud DFT de entrada del modelo AD.
+  double gainFactorSiemensPerCode = 0; ///< GF AD utilizado, en S/código DFT.
+  double systemOffsetCode = 0; ///< NOS AD utilizado, en códigos DFT.
+  double measuredAdmittanceSiemens = 0; ///< Admitancia medida YX, en S.
+  double cellAdmittanceSiemens = 0; ///< Admitancia de celda corregida, en S.
+  double r2Denominator = 0; ///< Denominador de la corrección R2 AD.
 };
 
+/** @brief Calcula GF y NOS AD a partir de dos referencias.
+ * @param nLow Magnitud DFT correspondiente a la admitancia inferior.
+ * @param nHigh Magnitud DFT correspondiente a la admitancia superior; debe ser mayor que nLow.
+ * @param yLowSiemens Admitancia inferior de referencia, en S; positiva.
+ * @param yHighSiemens Admitancia superior de referencia, en S; mayor que yLowSiemens.
+ * @param rfbOhms Resistencia nominal de realimentación, en Ω; positiva.
+ * @param frequencyHz Frecuencia solicitada, en Hz; positiva.
+ * @param excitationRange Rango de excitación asociado a la calibración.
+ * @param pgaGain Ganancia PGA asociada a la calibración.
+ * @param calibrationId Identificador que se adjunta al resultado.
+ * @return Calibración con GF/NOS y metadatos, o estado de error si los puntos son inválidos.
+ */
 inline AdCalibration calibrateAnalogDevices(double nLow, double nHigh, double yLowSiemens,
                                              double yHighSiemens, double rfbOhms,
                                              double frequencyHz, uint8_t excitationRange,
@@ -77,6 +107,19 @@ inline AdCalibration calibrateAnalogDevices(double nLow, double nHigh, double yL
   c.valid = true; c.error = AdCalibrationError::None; return c;
 }
 
+/** @brief Convierte una magnitud DFT a EC mediante calibración AD y corrección R2.
+ * @param magnitudeCode Magnitud DFT de la muestra.
+ * @param nominalKPerCm Constante de celda positiva, en cm⁻¹.
+ * @param r2Ohms Resistencia R2 no negativa, en Ω.
+ * @param calibration Calibración AD válida y compatible con la medida.
+ * @param measurementFrequencyHz Frecuencia DDS efectiva de medida, en Hz.
+ * @param expectedRfbOhms Realimentación esperada de la ruta, en Ω.
+ * @param excitationRange Rango de excitación utilizado.
+ * @param pgaGain Ganancia PGA utilizada.
+ * @return Conductividad en µS/cm y mS/cm, valores intermedios y estado/error.
+ * @note Comprueba frecuencia efectiva, RFB, rango y PGA; el controlador comprueba
+ * también el resto de metadatos antes de utilizar la calibración.
+ */
 inline Result convertAnalogDevices(double magnitudeCode, double nominalKPerCm, double r2Ohms,
                                    const AdCalibration& calibration, double measurementFrequencyHz,
                                    double expectedRfbOhms, uint8_t excitationRange, uint8_t pgaGain) {
@@ -114,6 +157,15 @@ inline Result convertAnalogDevices(double magnitudeCode, double nominalKPerCm, d
   result.valid = true; result.error = Error::None; return result;
 }
 
+/** @brief Convierte impedancia aparente a EC mediante RAW o SERIES experimental.
+ * @param apparentOhms Impedancia aparente positiva, en Ω.
+ * @param nominalKPerCm Constante de celda positiva, en cm⁻¹.
+ * @param model Model::Raw o Model::SeriesR2Experimental; AD usa convertAnalogDevices().
+ * @param r2Ohms Resistencia R2 no negativa, en Ω; se resta solo en SERIES.
+ * @return Conductividad en µS/cm y mS/cm, resistencia estimada y estado/error.
+ * @note SERIES depende de una hipótesis experimental sobre R2 y no establece
+ * por sí sola la exactitud de la cadena analógica o de la celda.
+ */
 inline Result convert(float apparentOhms, float nominalKPerCm, Model model, float r2Ohms) {
   Result result;
   result.model = model;

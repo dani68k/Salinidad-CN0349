@@ -1,61 +1,75 @@
-# CN0349Manager — controlador del instrumento
+# CN0349Manager
 
-## Hito 2G
+Controlador de Setup, calibración y ciclos Pt100/EC. Comparte un único
+`ImpedanceApp` y no depende de Serial ni de BLE. Sus operaciones se atienden
+desde el contexto cooperativo de `update()`.
 
-`buildAdCalibrations` crea LOW/HIGH al terminar los cuatro slots existentes.
-La API añade `getAdCalibrationStatus`; preflight exige AD solo para ese modelo.
-RAW/SERIES conservan impedancia legacy y AD procesa magnitud DFT directa. Cada
-ciclo congela setup, ruta, ID y coeficientes. Sin autorange.
+## Interfaz
 
-Hito 2F, 2026-10-27. Propósito: coordinar setup, calibración electrónica y ciclos
-Pt100/EC usando la adquisición existente, sin dependencia de Serial/Terminal.
-Se simplifica esta clase en lugar de introducir InstrumentController adicional.
+| Función | Propósito y resultado |
+|---|---|
+| `begin(busReady)` | Carga Setup, comprueba hardware y arranca calibración; devuelve `InstrumentError`. |
+| `update()` | Avanza calibración, adquisición y ciclos. |
+| `getStatus()`, `isBusy()` | Copia de estado/readiness, contadores y ocupación. |
+| `getSetup()`, `getImpedanceProfile()` | Copias de Setup y perfil configurado. |
+| `setSetup(setup)`, `setMeasurementSensors(sensors)` | Validan y aplican la configuración; devuelven `InstrumentError`. |
+| `runCalibration()` | Solicita calibración; si hay continuo, primero solicita parada. |
+| `getCalibrationStatus(preset, out)`, `getAdCalibrationStatus(range, out)` | Copian una referencia o calibración AD; `false` indica argumento inválido. |
+| `startSingleMeasurement()`, `startContinuousMeasurement()`, `stopMeasurement()` | Inician o detienen medidas; devuelven `InstrumentError`. |
+| `getMeasurementResult(out)` | Copia el último ciclo sin consumirlo, si existe. |
+| `takeMeasurementResult(out)` | Consume una vez el resultado pendiente; `false` si no existe. |
 
-Interfaz: `begin`, `update`, `getStatus`, `getSetup`, `setSetup`, `runCalibration`,
-`getCalibrationStatus`, `setMeasurementSensors`, `startSingleMeasurement`,
-`startContinuousMeasurement`, `stopMeasurement`, `getMeasurementResult` y
-`takeMeasurementResult`. Todos los setters/inicios devuelven InstrumentError.
-Consultas devuelven copias. Consumir desde un único contexto de loop.
+## Setup y persistencia
 
-La calibración utiliza cinco puntos por cada uno de los cuatro presets. Se
-invalida la sesión anterior al recalibrar, se guarda error por slot y se
-continúa tras un fallo. Se mantienen GF inverso y fase circular. Compatibilidad
-comprueba frecuencia, MCLK, excitación, PGA y settling, además de RFB y valores
-numéricos válidos. Un slot inválido nunca se sustituye por otro automáticamente.
+`InstrumentSetup` incluye sensores, intervalo, rango, preset de calibración EC,
+modelo, K y compensación de temperatura. Valores iniciales: ambos sensores,
+1000 ms, LOW, CAL_LOW_10K, RAW, K=1 cm⁻¹, compensación OFF y alpha=2 %/°C.
 
-Un solo secuenciador crea un snapshot por ciclo: Pt100 0x41, standby y EC
-0x81/0x82. No duplica la máquina DFT. Estados: Calibrating, Measuring, Stopping,
-Idle y Error. Busy reserva también los periodos entre ciclos continuos. Stop
-se completa por update; cal run durante continuo cancela y no reanuda.
+`setSetup()` rechaza cambios mientras hay trabajo activo; valida selección,
+intervalo 1–2147483647 ms, rango/preset compatibles, modelo, K finita positiva
+y alpha 0–5 %/°C con dos decimales. Con compensación activa exige ambos
+sensores. Guarda los cambios en Preferences, namespace `cn0349`, blob versión
+3; `loadSetup()` admite formatos anteriores. Si guardar falla, Setup permanece
+aplicado en RAM y se devuelve `Persistence`. No se escribe si no cambian los
+campos persistidos; las calibraciones y mediciones no se persisten.
 
-Resultados conservan setup y metadatos completos de cada sensor. Un sensor
-fallido no oculta al otro. La adquisición puede ser válida y la conversión
-estar fuera de rango. Cancelación produce snapshot inválido explícito.
-Un slot de resultados con `take` y contador de sobrescrituras evita duplicados
-y pérdidas silenciosas; [contrato completo](../../docs/architecture.md).
+## Calibración y ciclos
 
-Dependencias: ImpedanceApp, ImpedanceMath, Pt100, Conductivity y Config. Las
-tres extensiones históricas del gestor y sus parsers/programadores separados
-se retiraron. Las fórmulas de conversión siguen en sus módulos puros.
+Se recogen cinco muestras por cada referencia HIGH_100R, HIGH_1K, LOW_1K y
+LOW_10K. Se generan GF legacy y, cuando los dos puntos de cada rango son
+válidos, GF/NOS del modelo AD. La compatibilidad comprueba la configuración
+y los valores relevantes. Una referencia fallida no se reemplaza por otra.
 
-`getImpedanceProfile()` devuelve una copia del perfil configurado de adquisicion
-AD5934; no lee registros ni confirma el estado actual del hardware.
+Cada `MeasurementCycle` conserva un ID, Setup congelado y resultados por
+sensor. Pt100 se adquiere antes de EC cuando ambos están seleccionados; un
+fallo de uno no borra el resultado del otro. Un ciclo cancelado se marca como
+tal. `publishedCycles` y `overwrittenResults` permiten observar publicaciones
+y resultados no consumidos; BLE usa la copia no consumidora.
 
-`InstrumentSetup` incluye `temperatureCompensation` (por defecto OFF) y
-`temperatureAlpha` (por defecto 2,00 %/°C). `setSetup()` valida alpha entre
-0,00 y 5,00 con dos decimales y exige ambos sensores si la compensación está
-activa. `loadSetup()` valida el blob versionado de Preferences y acepta las
-versiones anteriores; `saveSetup()` guarda la versión 3 solo tras cambios
-efectivos. Si falla la escritura, se mantiene el setup en RAM y se devuelve
-`InstrumentError::Persistence`.
+EC25 se calcula al finalizar el ciclo si la compensación está activa y ambas
+lecturas son válidas: `EC25 = EC / (1 + alpha / 100 * (T - 25))`.
+`ec25Valid` indica si hay un resultado finito con denominador positivo.
 
-Al terminar cada ciclo, si ambos sensores son válidos y la compensación está
-activa, se calcula `EC25 = EC / (1 + alpha / 100 * (T - 25))` con los valores
-del mismo ciclo. `ec25Valid` indica disponibilidad: entradas no finitas,
-denominador no positivo o resultado no representable no producen EC25 válido.
+`ecRangeDiagnostic` compara la magnitud DFT con las dos referencias válidas y
+compatibles del rango activo. Fuera del intervalo produce `BelowRange` o
+`AboveRange`; el último 15 % hacia el máximo es `NearLimit`, el resto es
+`InRange` y una calibración o lectura no válida produce `InvalidCal`. No
+detecta saturación física ni cambia el rango.
 
-`SensorMeasurement::ecRangeDiagnostic` clasifica la magnitud DFT EC frente a
-las dos referencias compatibles del rango activo: `InvalidCal` si no hay un
-intervalo válido, `BelowRange` o `AboveRange` fuera del intervalo, `NearLimit`
-en su último 15 % y `InRange` en el resto. Una lectura DFT fallida conserva
-`InvalidCal`. El diagnóstico no modifica la conversión ni selecciona el rango.
+El perfil AD5934 expuesto es configuración, no una lectura actual de hardware.
+Ver [README principal](../../README.md) y [validación](../../test/VALIDACION.md).
+
+## Referencia Doxygen
+
+La API y los tipos públicos de `CN0349Manager.h` están documentados con
+comentarios Doxygen. Desde la raíz, crear `build/doxygen` si aún no existe y
+ejecutar `doxygen Doxyfile`; la referencia HTML se genera en
+`build/doxygen/html/index.html`. La configuración incluye CN0349Manager,
+ImpedanceApp, MuxApp, Pt100, Conductivity, AD5934, ADG715, BleApp y Terminal,
+las cabeceras compartidas de configuración, matemática y diagnóstico, y la
+página inicial.
+
+La generación incorpora diagramas SVG de colaboración y de dependencias entre
+cabeceras mediante Graphviz. Se extraen también miembros privados para mostrar
+relaciones internas. `DOT_PATH` en `Doxyfile` apunta a la instalación local de
+Graphviz; debe ajustarse en equipos con otra ubicación.
