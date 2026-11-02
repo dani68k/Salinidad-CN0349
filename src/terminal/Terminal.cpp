@@ -294,7 +294,7 @@ void Terminal::printCycle(const MeasurementCycle& c) {
     serial_.print("PT100 | ");
     if (c.pt100.valid) {
       serial_.print(c.pt100.temperature.celsius, 2); serial_.print(" C");
-      if (!ec) { serial_.print(" | "); serial_.print(c.pt100.acquisition.apparentImpedanceOhms, 2); serial_.print(" ohm"); }
+      serial_.print(" | "); serial_.print(c.pt100.acquisition.apparentImpedanceOhms, 2); serial_.print(" ohm");
     } else serial_.print(errorName(c.pt100.error));
   }
   if (ec) {

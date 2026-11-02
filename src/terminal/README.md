@@ -23,10 +23,12 @@ y selección son validados por el controlador, incluida la dependencia de ambos
 sensores cuando EC25 está activa. Los errores se presentan explícitamente;
 un fallo de persistencia indica que Setup quedó aplicado en RAM.
 
-`cal show` muestra GF legacy y coeficientes AD; los ciclos muestran Pt100,
-EC y, con compensación activa, EC25 o `unavailable`. Los ciclos cancelados
-no se imprimen. El terminal consume el slot de resultados; BLE consulta el
-último snapshot sin consumirlo.
+`cal show` muestra GF legacy y coeficientes AD; los ciclos muestran
+temperatura Pt100 (IEC 60751 o recta de calibración activada en Setup) y su
+resistencia medida en ohmios, EC y, con compensación activa, EC25 o
+`unavailable`. Los ciclos cancelados no se imprimen. El
+terminal consume el slot de resultados; BLE consulta el último snapshot sin
+consumirlo.
 
 La interfaz pública de `Terminal.h` forma parte de la referencia HTML generada
 con `doxygen Doxyfile` desde la raíz del proyecto.

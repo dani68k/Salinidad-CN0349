@@ -16,8 +16,8 @@ constexpr double A = 3.9083e-3; ///< Coeficiente A del modelo.
 constexpr double B = -5.775e-7; ///< Coeficiente B del modelo.
 constexpr double C = -4.183e-12; ///< Coeficiente C para temperaturas negativas.
 /** @brief Resultado de la validación y conversión de resistencia. */
-enum class Error : uint8_t { NotAttempted, None, NonFinite, NonPositive, OutOfRange };
-/** @brief Temperatura y estado devueltos por convert(). */
+enum class Error : uint8_t { NotAttempted, None, NonFinite, NonPositive, OutOfRange, InvalidCalibration };
+/** @brief Temperatura y estado devueltos por las conversiones Pt100. */
 struct Result {
   bool valid = false; ///< Indica si la temperatura es válida.
   double celsius = NAN; ///< Temperatura en °C; NaN si la conversión es inválida.
@@ -59,6 +59,48 @@ inline Result convert(double ohms) {
   r.error = Error::None;
   return r;
 }
+/** @brief Convierte resistencia con una recta obtenida de dos puntos.
+ * @param ohms Resistencia medida en Ω.
+ * @param temperatureA Temperatura patrón del punto A, en °C.
+ * @param resistanceA Resistencia medida del punto A, en Ω.
+ * @param temperatureB Temperatura patrón del punto B, en °C.
+ * @param resistanceB Resistencia medida del punto B, en Ω.
+ * @return Temperatura lineal; extrapola fuera del intervalo A-B. El punto A
+ * debe ser el inferior y B el superior en temperatura y resistencia.
+ */
+inline Result convertLinear(double ohms, double temperatureA, double resistanceA,
+                            double temperatureB, double resistanceB) {
+  Result r;
+  if (!isfinite(ohms) || !isfinite(temperatureA) || !isfinite(resistanceA) ||
+      !isfinite(temperatureB) || !isfinite(resistanceB)) {
+    r.error = Error::NonFinite;
+    return r;
+  }
+  if (ohms <= 0) {
+    r.error = Error::NonPositive;
+    return r;
+  }
+  if (resistanceA <= 0 || resistanceB <= 0 ||
+      temperatureA < -200 || temperatureA > 850 ||
+      temperatureB < -200 || temperatureB > 850 ||
+      temperatureB <= temperatureA || resistanceB <= resistanceA) {
+    r.error = Error::InvalidCalibration;
+    return r;
+  }
+  const double temperatureDelta = temperatureB - temperatureA;
+  const double resistanceDelta = resistanceB - resistanceA;
+  const double slope = temperatureDelta / resistanceDelta;
+  const double intercept = temperatureA - slope * resistanceA;
+  r.celsius = slope * ohms + intercept;
+  if (!isfinite(r.celsius) || fabs(r.celsius) > 3.402823466e38) {
+    r.celsius = NAN;
+    r.error = Error::OutOfRange;
+    return r;
+  }
+  r.valid = true;
+  r.error = Error::None;
+  return r;
+}
 /** @brief Obtiene el nombre textual de un código de error.
  * @param e Código a consultar.
  * @return Cadena estática o UNKNOWN si el código no se reconoce.
@@ -70,6 +112,7 @@ inline const char* errorName(Error e) {
     case Error::NonFinite: return "NON_FINITE";
     case Error::NonPositive: return "NON_POSITIVE";
     case Error::OutOfRange: return "OUT_OF_RANGE";
+    case Error::InvalidCalibration: return "INVALID_CALIBRATION";
   }
   return "UNKNOWN";
 }

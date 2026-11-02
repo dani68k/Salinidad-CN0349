@@ -9,8 +9,10 @@ ni servidor propio y no reconecta automáticamente.
 ## Measurement
 
 Muestra la última temperatura Pt100, EC medida y modelo. Si la compensación
-está activa, muestra EC25 o un indicador de indisponibilidad. El color de EC
-procede del diagnóstico del firmware: blanco dentro de rango o inválido,
+está activa, muestra EC25 o un indicador de indisponibilidad. Bajo la
+temperatura Pt100 muestra la resistencia aparente recibida de la adquisición
+del mismo ciclo. El color de EC procede del diagnóstico del firmware: blanco
+dentro de rango o inválido,
 naranja cerca del máximo o por debajo y rojo por encima. LOW por encima sugiere
 HIGH; HIGH por debajo sugiere probar LOW sin garantizar que esté en rango. No
 se cambia el rango automáticamente.
@@ -31,7 +33,13 @@ un aviso y bloquea APPLY. Alpha admite 0–5 %/°C y la referencia es 25 °C.
 Advanced Setup presenta el perfil AD5934 configurado como READ ONLY; no muestra
 una lectura actual de registros ni permite editarlo. Las unidades EC y los
 límites de la gráfica son preferencias de la página y no modifican el
-instrumento. Calibration muestra las referencias y permite solicitar CAL RUN.
+instrumento. Debajo del perfil, la calibración lineal Pt100 permite ingresar
+temperatura patrón y resistencia medida para dos puntos A/B, en orden
+ascendente (A inferior, B superior) para mantener m positiva; muestra la
+pendiente y el intercepto calculados, y guarda la selección y los puntos en el
+instrumento. ON aplica `T=m·R+b` en el firmware, incluida EC25; OFF conserva
+IEC 60751. La recta extrapola fuera del intervalo A-B. Calibration muestra las
+referencias y permite solicitar CAL RUN.
 
 Los valores EC, EC25 y el diagnóstico se asocian por `cycleId`; la WebApp no
 recalcula EC25 ni el diagnóstico. Si no llega el diagnóstico, la EC se muestra

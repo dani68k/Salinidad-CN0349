@@ -27,9 +27,15 @@ constexpr char EC_DIAGNOSTIC_UUID[] = "8d7b000b-6f7a-4f31-9c4d-2b6e6a7f3a10"; //
 constexpr char SETUP_EXT_UUID[] = "8d7b000c-6f7a-4f31-9c4d-2b6e6a7f3a10"; ///< Setup con compensación, lectura y notificación.
 constexpr char EC25_UUID[] = "8d7b000d-6f7a-4f31-9c4d-2b6e6a7f3a10"; ///< EC25 por ciclo, lectura y notificación.
 constexpr char SETUP_EXT_COMMAND_UUID[] = "8d7b000e-6f7a-4f31-9c4d-2b6e6a7f3a10"; ///< Orden de Setup ampliado, escritura.
+constexpr char PT100_RESISTANCE_UUID[] = "8d7b000f-6f7a-4f31-9c4d-2b6e6a7f3a10"; ///< Resistencia medida Pt100 por ciclo, lectura y notificación.
+constexpr char PT100_CALIBRATION_UUID[] = "8d7b0010-6f7a-4f31-9c4d-2b6e6a7f3a10"; ///< Configuración de calibración lineal Pt100, lectura y notificación.
+constexpr char PT100_CALIBRATION_COMMAND_UUID[] = "8d7b0011-6f7a-4f31-9c4d-2b6e6a7f3a10"; ///< Orden de configuración de calibración Pt100, escritura.
 constexpr size_t SETUP_EXT_SIZE = 17; ///< Tamaño del Setup ampliado, en bytes.
 constexpr size_t SETUP_EXT_COMMAND_SIZE = 18; ///< Tamaño de la orden de Setup ampliado, en bytes.
 constexpr size_t EC25_SIZE = 11; ///< Tamaño del resultado EC25, en bytes.
+constexpr size_t PT100_RESISTANCE_SIZE = 11; ///< Tamaño del resultado de resistencia Pt100, en bytes.
+constexpr size_t PT100_CALIBRATION_SIZE = 18; ///< Tamaño de configuración lineal Pt100, en bytes.
+constexpr size_t PT100_CALIBRATION_COMMAND_SIZE = 19; ///< Tamaño de orden de configuración Pt100, en bytes.
 constexpr size_t EC_DIAGNOSTIC_SIZE = 7; ///< Tamaño del diagnóstico EC, en bytes.
 constexpr size_t ADVANCED_SIZE = 20; ///< Tamaño del perfil AD5934, en bytes.
 constexpr size_t STATUS_CAPACITY = 80; ///< Capacidad del búfer STATUS, en bytes.
@@ -45,7 +51,7 @@ constexpr uint8_t PROTOCOL_VERSION = 1; ///< Versión de los paquetes binarios.
 /** @brief Códigos de resultado de una orden de Setup. */
 enum class SetupResult : uint8_t {
   Ok = 0, InvalidLength = 1, UnsupportedVersion = 2, InvalidValue = 3,
-  NotReady = 4, Busy = 5, InternalError = 6
+  NotReady = 4, Busy = 5, InternalError = 6, Persistence = 7
 };
 /** @brief Operaciones de calibración, selección de sensores y medición. */
 enum class ControlOperation : uint8_t {
@@ -110,6 +116,7 @@ class BleApp {
   void publishAdvanced();
   void publishStatus(bool forceNotify);
   void publishSetup(bool forceNotify);
+  void publishPt100Calibration(bool forceNotify);
   void publishSetupResult(uint8_t requestId, AtlantesBle::SetupResult result);
   void publishCalibration();
   void publishMeasurement();
@@ -133,8 +140,12 @@ class BleApp {
   NimBLECharacteristic* setupCharacteristic_ = nullptr;
   NimBLECharacteristic* setupExtCharacteristic_ = nullptr;
   NimBLECharacteristic* ec25Characteristic_ = nullptr;
+  NimBLECharacteristic* pt100ResistanceCharacteristic_ = nullptr;
+  NimBLECharacteristic* pt100CalibrationCharacteristic_ = nullptr;
   uint8_t lastSetupExt_[AtlantesBle::SETUP_EXT_SIZE]{};
   bool hasLastSetupExt_ = false;
+  uint8_t lastPt100Calibration_[AtlantesBle::PT100_CALIBRATION_SIZE]{};
+  bool hasLastPt100Calibration_ = false;
   NimBLECharacteristic* setupResultCharacteristic_ = nullptr;
   NimBLECharacteristic* calibrationCharacteristic_ = nullptr;
   NimBLECharacteristic* measurementCharacteristic_ = nullptr;
@@ -146,7 +157,7 @@ class BleApp {
   volatile bool rejectedPending_ = false;
   volatile uint8_t rejectedRequestId_ = 0;
   portMUX_TYPE commandMux_ = portMUX_INITIALIZER_UNLOCKED;
-  uint8_t command_[AtlantesBle::SETUP_EXT_COMMAND_SIZE]{};
+  uint8_t command_[AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE]{};
   size_t commandSize_ = 0;
   char lastStatus_[AtlantesBle::STATUS_CAPACITY]{};
   uint8_t lastSetup_[AtlantesBle::SETUP_SIZE]{};

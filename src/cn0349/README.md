@@ -22,16 +22,20 @@ desde el contexto cooperativo de `update()`.
 ## Setup y persistencia
 
 `InstrumentSetup` incluye sensores, intervalo, rango, preset de calibración EC,
-modelo, K y compensación de temperatura. Valores iniciales: ambos sensores,
-1000 ms, LOW, CAL_LOW_10K, RAW, K=1 cm⁻¹, compensación OFF y alpha=2 %/°C.
+modelo, K, compensación EC25 y calibración lineal Pt100. Valores iniciales:
+ambos sensores, 1000 ms, LOW, CAL_LOW_10K, RAW, K=1 cm⁻¹, compensación OFF,
+alpha=2 %/°C y calibración Pt100 OFF.
 
 `setSetup()` rechaza cambios mientras hay trabajo activo; valida selección,
 intervalo 1–2147483647 ms, rango/preset compatibles, modelo, K finita positiva
 y alpha 0–5 %/°C con dos decimales. Con compensación activa exige ambos
-sensores. Guarda los cambios en Preferences, namespace `cn0349`, blob versión
-3; `loadSetup()` admite formatos anteriores. Si guardar falla, Setup permanece
+sensores. Si la recta Pt100 está activa, exige que el punto A sea menor que B
+en temperatura y resistencia; las temperaturas deben estar entre −200 y 850 °C
+y las resistencias ser positivas. Así la pendiente m es positiva. La conversión
+lineal extrapola fuera de los puntos. Guarda los cambios en Preferences, namespace
+`cn0349`, blob versión 4; `loadSetup()` admite formatos anteriores. Si guardar falla, Setup permanece
 aplicado en RAM y se devuelve `Persistence`. No se escribe si no cambian los
-campos persistidos; las calibraciones y mediciones no se persisten.
+campos persistidos; las calibraciones electrónicas y mediciones no se persisten.
 
 ## Calibración y ciclos
 
@@ -45,6 +49,10 @@ sensor. Pt100 se adquiere antes de EC cuando ambos están seleccionados; un
 fallo de uno no borra el resultado del otro. Un ciclo cancelado se marca como
 tal. `publishedCycles` y `overwrittenResults` permiten observar publicaciones
 y resultados no consumidos; BLE usa la copia no consumidora.
+
+Pt100 usa IEC 60751 cuando la recta está desactivada. Activada, calcula la
+temperatura a partir de los dos puntos guardados; esa misma temperatura se
+publica por BLE/terminal y se utiliza para EC25.
 
 EC25 se calcula al finalizar el ciclo si la compensación está activa y ambas
 lecturas son válidas: `EC25 = EC / (1 + alpha / 100 * (T - 25))`.

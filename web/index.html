@@ -61,6 +61,7 @@
             <article class="result-card">
               <p class="eyebrow">Temperature with PT100</p>
               <p id="pt-result" class="reading-value">—</p>
+              <p id="pt-resistance-result" class="ec25-result" hidden>Resistance: —</p>
             </article>
             <article class="result-card">
               <p id="ec-title" class="eyebrow">Conductivity with RAW</p>
@@ -138,6 +139,28 @@
             <div><dt>PGA gain</dt><dd id="advanced-pga">&mdash;</dd></div>
             <div><dt>Measurement mode</dt><dd id="advanced-mode">&mdash;</dd></div>
           </dl>
+          <section class="pt100-calibration" aria-labelledby="pt100-calibration-title">
+            <div class="card-heading">
+              <div><p class="eyebrow">PT100</p><h2 id="pt100-calibration-title">Linear calibration</h2></div>
+              <label class="calibration-switch" for="pt100-linear-enabled">
+                <input id="pt100-linear-enabled" type="checkbox">
+                <span>Enable</span>
+              </label>
+            </div>
+            <p class="hint">Enter Point A first with the lower reference temperature and resistance, then Point B with the higher temperature and resistance.</p>
+            <div class="setup-grid pt100-calibration-grid">
+              <label for="pt100-temp-a">Point A temperature (°C)<input id="pt100-temp-a" type="number" min="-200" max="850" step="any"></label>
+              <label for="pt100-resistance-a">Point A resistance (Ω)<input id="pt100-resistance-a" type="number" min="0.000001" step="any"></label>
+              <label for="pt100-temp-b">Point B temperature (°C)<input id="pt100-temp-b" type="number" min="-200" max="850" step="any"></label>
+              <label for="pt100-resistance-b">Point B resistance (Ω)<input id="pt100-resistance-b" type="number" min="0.000001" step="any"></label>
+            </div>
+            <p id="pt100-calibration-equation" class="hint" aria-live="polite">Enter valid points A and B to calculate m and b.</p>
+            <p id="pt100-calibration-unavailable" class="compensation-warning" hidden>PT100 linear calibration is unavailable. Check firmware support and reconnect.</p>
+            <div class="setup-footer">
+              <p id="pt100-calibration-state" class="hint">Calibration is stored on the instrument.</p>
+              <button id="pt100-calibration-save" type="button" class="button primary">SAVE CALIBRATION</button>
+            </div>
+          </section>
         </section>
         </div>
         <section class="card setup-card display-settings" aria-label="Measurement display settings">

@@ -65,6 +65,15 @@ void BleApp::begin() {
       AtlantesBle::SETUP_EXT_COMMAND_UUID, NIMBLE_PROPERTY::WRITE, AtlantesBle::SETUP_EXT_COMMAND_SIZE);
   ec25Characteristic_ = service->createCharacteristic(
       AtlantesBle::EC25_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY, AtlantesBle::EC25_SIZE);
+  pt100CalibrationCharacteristic_ = service->createCharacteristic(
+      AtlantesBle::PT100_CALIBRATION_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
+      AtlantesBle::PT100_CALIBRATION_SIZE);
+  NimBLECharacteristic* pt100CalibrationCommand = service->createCharacteristic(
+      AtlantesBle::PT100_CALIBRATION_COMMAND_UUID, NIMBLE_PROPERTY::WRITE,
+      AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE);
+  pt100ResistanceCharacteristic_ = service->createCharacteristic(
+      AtlantesBle::PT100_RESISTANCE_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
+      AtlantesBle::PT100_RESISTANCE_SIZE);
   setupResultCharacteristic_ = service->createCharacteristic(
       AtlantesBle::SETUP_RESULT_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
       AtlantesBle::SETUP_RESULT_SIZE);
@@ -86,12 +95,16 @@ void BleApp::begin() {
   advancedCharacteristic_ = service->createCharacteristic(
       AtlantesBle::ADVANCED_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
       AtlantesBle::ADVANCED_SIZE);
-  initialized_ = setupExtCommand && setupExtCharacteristic_ && ec25Characteristic_ && advancedCharacteristic_ && statusCharacteristic_ && setupCharacteristic_ && commandCharacteristic &&
-      setupResultCharacteristic_ && calibrationCharacteristic_ && measurementCharacteristic_ && ecDiagnosticCharacteristic_ &&
+  initialized_ = setupExtCommand && setupExtCharacteristic_ && ec25Characteristic_ &&
+      pt100CalibrationCharacteristic_ && pt100CalibrationCommand && pt100ResistanceCharacteristic_ &&
+      advancedCharacteristic_ && statusCharacteristic_ &&
+      setupCharacteristic_ && commandCharacteristic && setupResultCharacteristic_ &&
+      calibrationCharacteristic_ && measurementCharacteristic_ && ecDiagnosticCharacteristic_ &&
       controlCommandCharacteristic && controlResultCharacteristic_;
   if (!initialized_) return;
   commandCharacteristic->setCallbacks(&commandCallbacks_);
   setupExtCommand->setCallbacks(&commandCallbacks_);
+  pt100CalibrationCommand->setCallbacks(&commandCallbacks_);
   controlCommandCharacteristic->setCallbacks(&controlCallbacks_);
 
   publishAdvanced();
@@ -109,6 +122,10 @@ void BleApp::begin() {
   ecDiagnosticCharacteristic_->setValue(emptyDiagnostic, sizeof(emptyDiagnostic));
   uint8_t emptyEc25[AtlantesBle::EC25_SIZE]{}; emptyEc25[0] = AtlantesBle::PROTOCOL_VERSION;
   ec25Characteristic_->setValue(emptyEc25, sizeof(emptyEc25));
+  uint8_t emptyPt100Resistance[AtlantesBle::PT100_RESISTANCE_SIZE]{};
+  emptyPt100Resistance[0] = AtlantesBle::PROTOCOL_VERSION;
+  pt100ResistanceCharacteristic_->setValue(emptyPt100Resistance, sizeof(emptyPt100Resistance));
+  publishPt100Calibration(false);
   service->start();
   NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
   advertising->setName(AtlantesBle::DEVICE_NAME);
@@ -134,6 +151,7 @@ void BleApp::update() {
   publishAdvanced();
   publishStatus(false);
   publishSetup(false);
+  publishPt100Calibration(false);
   publishMeasurement();
 }
 
@@ -216,6 +234,24 @@ void BleApp::publishSetup(bool forceNotify) {
     memcpy(lastSetupExt_, extended, sizeof(extended)); hasLastSetupExt_ = true;
     setupExtCharacteristic_->setValue(extended, sizeof(extended));
     if (connected_) setupExtCharacteristic_->notify();
+  }
+}
+
+void BleApp::publishPt100Calibration(bool forceNotify) {
+  const InstrumentSetup setup = instrument_.getSetup();
+  uint8_t payload[AtlantesBle::PT100_CALIBRATION_SIZE]{};
+  payload[0] = AtlantesBle::PROTOCOL_VERSION;
+  payload[1] = static_cast<uint8_t>(setup.pt100LinearCalibrationEnabled);
+  memcpy(payload + 2, &setup.pt100TemperatureA, sizeof(float));
+  memcpy(payload + 6, &setup.pt100ResistanceA, sizeof(float));
+  memcpy(payload + 10, &setup.pt100TemperatureB, sizeof(float));
+  memcpy(payload + 14, &setup.pt100ResistanceB, sizeof(float));
+  if (forceNotify || !hasLastPt100Calibration_ ||
+      memcmp(payload, lastPt100Calibration_, sizeof(payload)) != 0) {
+    memcpy(lastPt100Calibration_, payload, sizeof(payload));
+    hasLastPt100Calibration_ = true;
+    pt100CalibrationCharacteristic_->setValue(payload, sizeof(payload));
+    if (connected_) pt100CalibrationCharacteristic_->notify();
   }
 }
 
@@ -313,6 +349,12 @@ void BleApp::publishMeasurement() {
   memcpy(ec25 + 7, &cycle.ec25MicroSiemens, sizeof(float));
   ec25Characteristic_->setValue(ec25, sizeof(ec25));
   if (connected_) ec25Characteristic_->notify();
+  uint8_t pt100Resistance[AtlantesBle::PT100_RESISTANCE_SIZE] = {
+      AtlantesBle::PROTOCOL_VERSION, payload[2], payload[3], payload[4], payload[5],
+      static_cast<uint8_t>(ptSelected), static_cast<uint8_t>(cycle.pt100.acquisition.valid)};
+  memcpy(pt100Resistance + 7, &cycle.pt100.acquisition.apparentImpedanceOhms, sizeof(float));
+  pt100ResistanceCharacteristic_->setValue(pt100Resistance, sizeof(pt100Resistance));
+  if (connected_) pt100ResistanceCharacteristic_->notify();
   measurementCharacteristic_->setValue(payload, sizeof(payload));
   if (connected_) measurementCharacteristic_->notify();
   lastPublishedCycle_ = status.publishedCycles;
@@ -442,7 +484,8 @@ void BleApp::enqueueSetupCommand(const uint8_t* data, size_t size) {
 
 void BleApp::processSetupCommand() {
   bool rejected = false, hasCommand = false;
-  uint8_t rejectedRequestId = 0, requestId = 0, command[AtlantesBle::SETUP_EXT_COMMAND_SIZE]{};
+  uint8_t rejectedRequestId = 0, requestId = 0,
+      command[AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE]{};
   size_t size = 0;
   portENTER_CRITICAL(&commandMux_);
   if (rejectedPending_) {
@@ -451,13 +494,15 @@ void BleApp::processSetupCommand() {
   if (commandPending_) {
     hasCommand = true; size = commandSize_;
     if (size > 1) requestId = command_[1];
-    if (size == AtlantesBle::SETUP_COMMAND_SIZE || size == sizeof(command)) memcpy(command, command_, size);
+    if (size == AtlantesBle::SETUP_COMMAND_SIZE || size == AtlantesBle::SETUP_EXT_COMMAND_SIZE ||
+        size == AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE) memcpy(command, command_, size);
     commandPending_ = false;
   }
   portEXIT_CRITICAL(&commandMux_);
   if (rejected) publishSetupResult(rejectedRequestId, AtlantesBle::SetupResult::Busy);
   if (!hasCommand) return;
-  if (size != AtlantesBle::SETUP_COMMAND_SIZE && size != AtlantesBle::SETUP_EXT_COMMAND_SIZE) {
+  if (size != AtlantesBle::SETUP_COMMAND_SIZE && size != AtlantesBle::SETUP_EXT_COMMAND_SIZE &&
+      size != AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE) {
     publishSetupResult(requestId, AtlantesBle::SetupResult::InvalidLength); return;
   }
   if (command[0] != AtlantesBle::PROTOCOL_VERSION) {
@@ -471,6 +516,29 @@ void BleApp::processSetupCommand() {
     publishSetupResult(requestId, AtlantesBle::SetupResult::Busy); return;
   }
   InstrumentSetup setup = instrument_.getSetup();
+  if (size == AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE) {
+    if (command[2] > 1) { publishSetupResult(requestId, AtlantesBle::SetupResult::InvalidValue); return; }
+    setup.pt100LinearCalibrationEnabled = command[2] != 0;
+    memcpy(&setup.pt100TemperatureA, command + 3, sizeof(float));
+    memcpy(&setup.pt100ResistanceA, command + 7, sizeof(float));
+    memcpy(&setup.pt100TemperatureB, command + 11, sizeof(float));
+    memcpy(&setup.pt100ResistanceB, command + 15, sizeof(float));
+    const InstrumentError error = instrument_.setSetup(setup);
+    if (error == InstrumentError::None) {
+      publishPt100Calibration(true);
+      publishSetupResult(requestId, AtlantesBle::SetupResult::Ok);
+    } else if (error == InstrumentError::Persistence) {
+      publishPt100Calibration(true);
+      publishSetupResult(requestId, AtlantesBle::SetupResult::Persistence);
+    } else if (error == InstrumentError::Busy) {
+      publishSetupResult(requestId, AtlantesBle::SetupResult::Busy);
+    } else if (error == InstrumentError::InvalidArgument) {
+      publishSetupResult(requestId, AtlantesBle::SetupResult::InvalidValue);
+    } else {
+      publishSetupResult(requestId, AtlantesBle::SetupResult::InternalError);
+    }
+    return;
+  }
   uint8_t setupPayload[AtlantesBle::SETUP_SIZE]{};
   setupPayload[0] = command[0];
   memcpy(setupPayload + 1, command + 2, AtlantesBle::SETUP_SIZE - 1);
@@ -485,7 +553,12 @@ void BleApp::processSetupCommand() {
   const InstrumentError error = instrument_.setSetup(setup);
   if (error == InstrumentError::None) {
     publishSetup(true);
+    publishPt100Calibration(true);
     publishSetupResult(requestId, AtlantesBle::SetupResult::Ok);
+  } else if (error == InstrumentError::Persistence) {
+    publishSetup(true);
+    publishPt100Calibration(true);
+    publishSetupResult(requestId, AtlantesBle::SetupResult::Persistence);
   } else if (error == InstrumentError::Busy) {
     publishSetupResult(requestId, AtlantesBle::SetupResult::Busy);
   } else if (error == InstrumentError::InvalidArgument) {

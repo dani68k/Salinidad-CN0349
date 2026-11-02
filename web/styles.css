@@ -109,6 +109,13 @@ h2 { margin: 4px 0 0; font-size: 1rem; font-weight: 600; }
 .setup-card, .calibration-card { padding: 20px; }
 .setup-columns { display: grid; grid-template-columns: minmax(0, 52fr) minmax(0, 48fr); gap: 18px; }
 .advanced-card .hint { margin-top: 18px; }
+.pt100-calibration { margin-top: 24px; padding-top: 18px; border-top: 1px solid #2a4357; }
+.pt100-calibration .card-heading { align-items: center; }
+.pt100-calibration .hint { margin: 12px 0; }
+.pt100-calibration-grid { margin-top: 14px; }
+.calibration-switch { display: flex; grid-template-columns: auto auto; align-items: center; gap: 8px; cursor: pointer; }
+.calibration-switch input { width: 18px; min-height: 18px; height: 18px; accent-color: #42c8ff; }
+.pt100-calibration .setup-footer { margin-top: 16px; }
 .advanced-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 20px 0 0; }
 .advanced-grid div { min-width: 0; }
 .advanced-grid dt { color: #a9bdca; font-size: .72rem; }

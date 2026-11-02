@@ -73,7 +73,8 @@ SETUP_COMMAND inserta `requestId:u8` después de version. Valores: sensors
 El tamaño fijo cabe en el payload ATT mínimo y evita fragmentar JSON.
 
 SETUP_RESULT es `version, requestId, result`; códigos: 0 OK, 1 INVALID_LENGTH,
-2 UNSUPPORTED_VERSION, 3 INVALID_VALUE, 4 NOT_READY, 5 BUSY y 6 INTERNAL_ERROR.
+2 UNSUPPORTED_VERSION, 3 INVALID_VALUE, 4 NOT_READY, 5 BUSY, 6 INTERNAL_ERROR
+y 7 PERSISTENCE (configuración aplicada en RAM, pero no guardada).
 El callback solo copia una petición fija; `update()` exige Idle/readiness,
 decodifica y llama una vez a `setSetup()`. Así no hay aplicación parcial ni
 acceso concurrente al Manager. SETUP se notifica tras APPLY y cuando Terminal
@@ -137,3 +138,27 @@ EC25 `8d7b000d-6f7a-4f31-9c4d-2b6e6a7f3a10` es READ + NOTIFY: `version:u8`,
 `cycleId:u32`, `enabled:u8`, `valid:u8`, `ec25MicroSiemens:f32`, en
 little-endian. El valor solo es utilizable si `valid` es 1. SETUP y MEASUREMENT
 anteriores conservan sus formatos y UUID.
+
+PT100_RESISTANCE `8d7b000f-6f7a-4f31-9c4d-2b6e6a7f3a10` es READ + NOTIFY y
+contiene `version:u8`, `cycleId:u32`, `selected:u8`, `valid:u8` y
+`apparentImpedanceOhms:f32`, en little-endian. La resistencia solo es utilizable
+si `selected` y `valid` son 1; procede de la adquisición del ciclo y no se
+recalcula a partir de la temperatura.
+
+La configuración persistente usa el blob Setup versión 4 para guardar los
+puntos y el estado de la calibración lineal Pt100; se siguen admitiendo los
+formatos anteriores y la calibración queda OFF si no existía.
+
+PT100_CALIBRATION `8d7b0010-6f7a-4f31-9c4d-2b6e6a7f3a10` es READ + NOTIFY y
+contiene `version:u8`, `enabled:u8`, `temperatureA:f32`, `resistanceA:f32`,
+`temperatureB:f32`, `resistanceB:f32`. PT100_CALIBRATION_COMMAND
+`8d7b0011-6f7a-4f31-9c4d-2b6e6a7f3a10` es WRITE y contiene
+`version:u8`, `requestId:u8` y esos cinco campos restantes. Float32 es
+IEEE-754 little-endian. La orden usa SETUP_RESULT; solo se aplica en READY y
+valida que las temperaturas sean distintas y estén entre −200 y 850 °C, que
+las resistencias sean positivas, y que tanto la temperatura como la resistencia
+de B sean mayores que las de A. Así la pendiente m es positiva. El paquete de
+comando tiene 19 bytes.
+Cuando está activa, la temperatura se calcula como `T=m·R+b`, con los dos
+puntos guardados, y extrapola fuera del intervalo A-B. La conversión IEC
+60751 original continúa siendo el modo OFF.

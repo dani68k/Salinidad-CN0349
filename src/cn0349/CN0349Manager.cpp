@@ -80,6 +80,17 @@ bool CN0349Manager::getAdCalibrationStatus(CN0349EcRange range, Conductivity::Ad
 }
 bool CN0349Manager::validSetup(const InstrumentSetup& setup) {
   const auto sensors = static_cast<uint8_t>(setup.sensors), preset = static_cast<uint8_t>(setup.ecCalibration);
+  const bool calibrationUnset = setup.pt100TemperatureA == 0 && setup.pt100ResistanceA == 0 &&
+      setup.pt100TemperatureB == 0 && setup.pt100ResistanceB == 0;
+  const bool calibrationPointsValid = isfinite(setup.pt100TemperatureA) &&
+      setup.pt100TemperatureA >= -200 && setup.pt100TemperatureA <= 850 &&
+      isfinite(setup.pt100ResistanceA) && setup.pt100ResistanceA > 0 &&
+      isfinite(setup.pt100TemperatureB) && setup.pt100TemperatureB >= -200 &&
+      setup.pt100TemperatureB <= 850 && setup.pt100TemperatureB > setup.pt100TemperatureA &&
+      isfinite(setup.pt100ResistanceB) && setup.pt100ResistanceB > 0 &&
+      setup.pt100ResistanceB > setup.pt100ResistanceA;
+  const bool validPt100Calibration = setup.pt100LinearCalibrationEnabled ?
+      calibrationPointsValid : calibrationUnset || calibrationPointsValid;
   return sensors >= 1 && sensors <= 3 && setup.intervalMs > 0 && setup.intervalMs <= 0x7fffffffUL &&
       (setup.ecRange == CN0349EcRange::High || setup.ecRange == CN0349EcRange::Low) &&
       preset < 4 && (setup.ecRange == CN0349EcRange::High ? preset < 2 : preset >= 2) &&
@@ -87,18 +98,19 @@ bool CN0349Manager::validSetup(const InstrumentSetup& setup) {
        setup.ecModel == Conductivity::Model::AnalogDevices) && isfinite(setup.nominalKPerCm) && setup.nominalKPerCm > 0 &&
       isfinite(setup.temperatureAlpha) && setup.temperatureAlpha >= 0 && setup.temperatureAlpha <= 5 &&
       fabsf(setup.temperatureAlpha * 100.0f - roundf(setup.temperatureAlpha * 100.0f)) < 0.001f &&
-      (!setup.temperatureCompensation || setup.sensors == MeasurementSensors::Both);
+      (!setup.temperatureCompensation || setup.sensors == MeasurementSensors::Both) && validPt100Calibration;
 }
 
 void CN0349Manager::loadSetup() {
   Preferences preferences;
   if (!preferences.begin("cn0349", true)) return;
-  uint8_t blob[20]{};
+  uint8_t blob[34]{};
   const size_t length = preferences.getBytesLength("setup");
-  const bool read = (length == 12 || length == 17 || length == sizeof(blob)) &&
+  const bool read = (length == 12 || length == 17 || length == 20 || length == sizeof(blob)) &&
       preferences.getBytes("setup", blob, length) == length;
   preferences.end();
-  if (!read || !((blob[0] == 1 && length == 12) || (blob[0] == 2 && length == sizeof(blob)) || (blob[0] == 3 && length == 17)) ||
+  if (!read || !((blob[0] == 1 && length == 12) || (blob[0] == 2 && length == 20) ||
+      (blob[0] == 3 && length == 17) || (blob[0] == 4 && length == sizeof(blob))) ||
       blob[1] < 1 || blob[1] > 3 || blob[2] > 1 || blob[3] > 2) return;
   InstrumentSetup candidate = setup_;
   candidate.sensors = static_cast<MeasurementSensors>(blob[1]);
@@ -113,13 +125,22 @@ void CN0349Manager::loadSetup() {
     if (blob[12] > 1) return;
     candidate.temperatureCompensation = blob[12] != 0;
     memcpy(&candidate.temperatureAlpha, blob + 13, sizeof(float));
+  } else if (blob[0] == 4) {
+    if (blob[12] > 1 || blob[17] > 1) return;
+    candidate.temperatureCompensation = blob[12] != 0;
+    memcpy(&candidate.temperatureAlpha, blob + 13, sizeof(float));
+    candidate.pt100LinearCalibrationEnabled = blob[17] != 0;
+    memcpy(&candidate.pt100TemperatureA, blob + 18, sizeof(float));
+    memcpy(&candidate.pt100ResistanceA, blob + 22, sizeof(float));
+    memcpy(&candidate.pt100TemperatureB, blob + 26, sizeof(float));
+    memcpy(&candidate.pt100ResistanceB, blob + 30, sizeof(float));
   }
   if (validSetup(candidate)) setup_ = candidate;
 }
 
 bool CN0349Manager::saveSetup() const {
-  uint8_t blob[17]{};
-  blob[0] = 3;
+  uint8_t blob[34]{};
+  blob[0] = 4;
   blob[1] = static_cast<uint8_t>(setup_.sensors);
   blob[2] = setup_.ecRange == CN0349EcRange::High ? 1 : 0;
   blob[3] = static_cast<uint8_t>(setup_.ecModel);
@@ -127,6 +148,11 @@ bool CN0349Manager::saveSetup() const {
   memcpy(blob + 8, &setup_.nominalKPerCm, sizeof(float));
   blob[12] = setup_.temperatureCompensation ? 1 : 0;
   memcpy(blob + 13, &setup_.temperatureAlpha, sizeof(float));
+  blob[17] = setup_.pt100LinearCalibrationEnabled ? 1 : 0;
+  memcpy(blob + 18, &setup_.pt100TemperatureA, sizeof(float));
+  memcpy(blob + 22, &setup_.pt100ResistanceA, sizeof(float));
+  memcpy(blob + 26, &setup_.pt100TemperatureB, sizeof(float));
+  memcpy(blob + 30, &setup_.pt100ResistanceB, sizeof(float));
   Preferences preferences;
   if (!preferences.begin("cn0349", false)) return false;
   const bool written = preferences.putBytes("setup", blob, sizeof(blob)) == sizeof(blob);
@@ -139,7 +165,10 @@ InstrumentError CN0349Manager::setSetup(const InstrumentSetup& setup) {
   if (!validSetup(setup)) return InstrumentError::InvalidArgument;
   const bool changed = setup.sensors != setup_.sensors || setup.intervalMs != setup_.intervalMs ||
       setup.ecRange != setup_.ecRange || setup.ecModel != setup_.ecModel || setup.nominalKPerCm != setup_.nominalKPerCm ||
-      setup.temperatureCompensation != setup_.temperatureCompensation || setup.temperatureAlpha != setup_.temperatureAlpha;
+      setup.temperatureCompensation != setup_.temperatureCompensation || setup.temperatureAlpha != setup_.temperatureAlpha ||
+      setup.pt100LinearCalibrationEnabled != setup_.pt100LinearCalibrationEnabled ||
+      setup.pt100TemperatureA != setup_.pt100TemperatureA || setup.pt100ResistanceA != setup_.pt100ResistanceA ||
+      setup.pt100TemperatureB != setup_.pt100TemperatureB || setup.pt100ResistanceB != setup_.pt100ResistanceB;
   setup_ = setup;
   if (changed) setupPersistenceFailed_ = !saveSetup();
   return setupPersistenceFailed_ ? InstrumentError::Persistence : InstrumentError::None;
@@ -330,7 +359,13 @@ void CN0349Manager::finishSensor() {
       a.valid = true;
       if (activeSensor_ == MeasurementSensors::Ec)
         r.ecRangeDiagnostic = diagnoseEcRange(cycle_.setup.ecRange, a.magnitude, a.effectiveFrequencyHz);
-      if (activeSensor_ == MeasurementSensors::Pt100) { r.temperature = Pt100::convert(a.apparentImpedanceOhms); r.valid = r.temperature.valid; }
+      if (activeSensor_ == MeasurementSensors::Pt100) {
+        r.temperature = cycle_.setup.pt100LinearCalibrationEnabled ?
+            Pt100::convertLinear(a.apparentImpedanceOhms, cycle_.setup.pt100TemperatureA,
+                cycle_.setup.pt100ResistanceA, cycle_.setup.pt100TemperatureB,
+                cycle_.setup.pt100ResistanceB) : Pt100::convert(a.apparentImpedanceOhms);
+        r.valid = r.temperature.valid;
+      }
       else if (cycle_.setup.ecModel == Conductivity::Model::AnalogDevices) {
         const auto& ad = adCalibrations_[cycle_.setup.ecRange == CN0349EcRange::High ? 0 : 1];
         r.conductivity = Conductivity::convertAnalogDevices(a.magnitude, cycle_.setup.nominalKPerCm,

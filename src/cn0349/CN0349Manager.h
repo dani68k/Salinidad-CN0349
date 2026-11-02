@@ -100,7 +100,8 @@ struct CN0349ImpedanceResult {
 
 /** @brief Configuración efectiva utilizada para nuevos ciclos.
  * La compensación activa exige ambos sensores; alpha admite 0–5 %/°C con
- * dos decimales. La configuración se persiste, pero las calibraciones no.
+ * dos decimales. También puede guardar puntos de calibración lineal Pt100.
+ * La configuración se persiste.
  */
 struct InstrumentSetup {
   MeasurementSensors sensors = MeasurementSensors::Both; ///< Sensores seleccionados.
@@ -111,6 +112,9 @@ struct InstrumentSetup {
   float nominalKPerCm = 1.0f; ///< Constante nominal de celda, en cm⁻¹.
   bool temperatureCompensation = false; ///< Activa el cálculo EC25.
   float temperatureAlpha = 2.0f; ///< Coeficiente lineal, en %/°C.
+  bool pt100LinearCalibrationEnabled = false; ///< Activa la recta de calibración Pt100.
+  float pt100TemperatureA = 0, pt100ResistanceA = 0; ///< Punto A patrón, °C y Ω.
+  float pt100TemperatureB = 0, pt100ResistanceB = 0; ///< Punto B patrón, °C y Ω.
 };
 /** @brief Resultado individual de Pt100 o EC dentro de un ciclo. */
 struct SensorMeasurement {
