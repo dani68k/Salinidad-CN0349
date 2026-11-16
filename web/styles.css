@@ -94,7 +94,8 @@ h2 { margin: 4px 0 0; font-size: 1rem; font-weight: 600; }
 #ec25-legend[hidden] { display: none; }
 .legend-ec25 { background: #d7a7ff; }
 .ec25-result { margin: 6px 0 0; color: #d7e3ec; font-size: .8rem; }
-.ec-readings { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; column-gap: 18px; }
+.ec-readings { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; column-gap: 8px; }
+.ec-reading-label, .ec-reading-separator { margin-top: 6px; color: #f1f7fb; font-size: clamp(1.25rem, 2.2vw, 1.8rem); font-weight: 550; }
 .ec-readings .ec25-result { color: #f1f7fb; font-size: clamp(1.25rem, 2.2vw, 1.8rem); font-variant-numeric: tabular-nums; font-weight: 550; }
 .temperature-compensation { margin-top: 20px; padding-top: 16px; border-top: 1px solid #2a4357; }
 .temperature-compensation .setup-grid { margin-top: 12px; }
@@ -206,6 +207,7 @@ td { color: #dce7ef; font-size: .78rem; }
   .result-card .eyebrow { font-size: .56rem; }
   .reading-value { margin-top: 3px; font-size: clamp(1.05rem, 2vw, 1.5rem); }
   .ec-readings .ec25-result { margin-top: 3px; font-size: clamp(1.05rem, 2vw, 1.5rem); }
+  .ec-reading-label, .ec-reading-separator { margin-top: 3px; font-size: clamp(1.05rem, 2vw, 1.5rem); }
   .history-card { margin-top: 6px; padding: 8px 12px 6px; }
   .history-card .card-heading h2 { font-size: .88rem; }
   .measurement-chart { height: 145px; margin-top: 4px; }

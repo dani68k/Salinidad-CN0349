@@ -358,7 +358,7 @@ function renderEc(){
     const failure=ecError===6&&detail>1?(conductivityErrors[detail]||'MEASUREMENT_FAILED'):(instrumentErrors[ecError]||'ERROR');
     ui.ecResult.textContent=state===0?'Not selected':state===1?`${ui.ecDisplay.value==='us'?`${microSiemens.toFixed(1)} µS/cm`:ui.ecDisplay.value==='ms'?`${milliSiemens.toFixed(3)} mS/cm`:`${microSiemens.toFixed(1)} µS/cm · ${milliSiemens.toFixed(3)} mS/cm`}`:failure;
   }
-  const ec25=$('#ec25-result');ec25.hidden=!appliedSetup?.compensation;
+  const ec25=$('#ec25-result');ec25.hidden=!appliedSetup?.compensation;$('#ec-reading-separator').hidden=ec25.hidden;
   const value=latestEc?.ec25;ec25.textContent=`EC25: ${Number.isFinite(value)?(ui.ecDisplay.value==='ms'?`${(value/1000).toFixed(3)} mS/cm`:ui.ecDisplay.value==='both'?`${value.toFixed(1)} \u00b5S/cm \u00b7 ${(value/1000).toFixed(3)} mS/cm`:`${value.toFixed(1)} \u00b5S/cm`):'\u2014'}`;
   renderHistory();
 }
