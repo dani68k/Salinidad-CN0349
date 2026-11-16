@@ -69,6 +69,12 @@ bool ImpedanceApp::configureSingle(MuxApp::CalibrationPreset preset, uint32_t fr
   return true;
 }
 
+bool ImpedanceApp::setExcitationRange(uint8_t range) {
+  if (isBusy() || range < 1 || range > 4) return false;
+  profile_.excitationRange = range;
+  return true;
+}
+
 bool ImpedanceApp::cancelOperation() {
   if (!isBusy()) return false;
   failMeasurement("cancelada por Manager", true);
@@ -187,7 +193,7 @@ bool ImpedanceApp::startMeasurement(bool busReady, uint8_t routeMask) {
       mux_.resolveCalibrationPreset(profile_.calibrationPreset, selectedCalibration))) {
     return false;
   }
-  if (!profile_.externalClock || profile_.excitationRange != 1 || profile_.pgaGain != 1 ||
+  if (!profile_.externalClock || (profile_.excitationRange < 1 || profile_.excitationRange > 4) || profile_.pgaGain != 1 ||
       (profile_.numberOfIncrements != 0 || incrementCode_ != 0)) {
 
     return false;
@@ -314,7 +320,7 @@ void ImpedanceApp::advanceMeasurement() {
   switch (measurementState_) {
     case MeasurementState::Configuring: {
       if (configPhase_ == 0) {
-        if (!driver_.configureRange1PgaX1()) { failMeasurement("fallo al configurar control Range 1/PGA x1", true); return; }
+        if (!driver_.configureRangePgaX1(profile_.excitationRange)) { failMeasurement("fallo al configurar rango/PGA x1", true); return; }
         configPhase_ = 1;
         setMeasurementState(MeasurementState::PreparingStandby);
         return;
@@ -352,7 +358,7 @@ void ImpedanceApp::advanceMeasurement() {
         const uint8_t field = verifyPhase_++;
         uint8_t reg;
         uint8_t expected;
-        if (field == 0) { reg = AD5934::CONTROL_HIGH; expected = 0xB1; }
+        if (field == 0) { reg = AD5934::CONTROL_HIGH; expected = static_cast<uint8_t>(0xB1 | ((profile_.excitationRange == 1 ? 0 : profile_.excitationRange == 2 ? 3 : profile_.excitationRange - 2) << 1)); }
         else if (field < 4) { reg = AD5934::START_FREQUENCY_MSB + field - 1; expected = static_cast<uint8_t>(startCode_ >> (16 - 8 * (field - 1))); }
         else if (field < 7) { reg = AD5934::FREQUENCY_INCREMENT_MSB + field - 4; expected = static_cast<uint8_t>(incrementCode_ >> (16 - 8 * (field - 4))); }
         else if (field < 9) { reg = AD5934::NUMBER_INCREMENTS_MSB + field - 7; expected = static_cast<uint8_t>(activeIncrements_ >> (field == 7 ? 8 : 0)); }

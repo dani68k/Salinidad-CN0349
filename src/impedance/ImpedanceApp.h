@@ -88,6 +88,8 @@ class ImpedanceApp {
    * @note Configura el perfil en RAM; los registros se escriben durante la adquisición.
    */
   bool configureSingle(MuxApp::CalibrationPreset preset, uint32_t frequencyHz, uint16_t settlingCycles);
+  /** Selecciona en RAM el rango de excitaci?n 1..4 cuando no hay adquisici?n activa. */
+  bool setExcitationRange(uint8_t range);
   /** @brief Solicita una adquisición de la referencia del perfil.
    * @param busReady Estado de inicialización del bus I²C.
    * @return true si se inició; false si no puede iniciarse.

@@ -140,6 +140,8 @@ class AD5934 {
    * @return true si se configuró y verificó; false ante estado inválido o error I²C.
    */
   bool configureRange1PgaX1();
+  /** Configura el rango 1..4 y PGA x1 en power-down, con verificaci?n. */
+  bool configureRangePgaX1(uint8_t range);
   /** @brief Lleva el dispositivo de power-down a standby, o verifica standby existente.
    * @param[out] previousControl Control leído antes de la operación.
    * @param[out] verifiedControl Control confirmado después de la operación.

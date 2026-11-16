@@ -30,6 +30,14 @@ constexpr char SETUP_EXT_COMMAND_UUID[] = "8d7b000e-6f7a-4f31-9c4d-2b6e6a7f3a10"
 constexpr char PT100_RESISTANCE_UUID[] = "8d7b000f-6f7a-4f31-9c4d-2b6e6a7f3a10"; ///< Resistencia medida Pt100 por ciclo, lectura y notificación.
 constexpr char PT100_CALIBRATION_UUID[] = "8d7b0010-6f7a-4f31-9c4d-2b6e6a7f3a10"; ///< Configuración de calibración lineal Pt100, lectura y notificación.
 constexpr char PT100_CALIBRATION_COMMAND_UUID[] = "8d7b0011-6f7a-4f31-9c4d-2b6e6a7f3a10"; ///< Orden de configuración de calibración Pt100, escritura.
+constexpr char FREQUENCY_UUID[] = "8d7b0012-6f7a-4f31-9c4d-2b6e6a7f3a10"; ///< Frecuencia solicitada, lectura y notificación.
+constexpr char FREQUENCY_COMMAND_UUID[] = "8d7b0013-6f7a-4f31-9c4d-2b6e6a7f3a10"; ///< Orden de frecuencia, escritura.
+constexpr char EC_PROBE_POINTS_UUID[] = "8d7b0014-6f7a-4f31-9c4d-2b6e6a7f3a10";
+constexpr char EC_PROBE_POINTS_COMMAND_UUID[] = "8d7b0015-6f7a-4f31-9c4d-2b6e6a7f3a10";
+constexpr size_t EC_PROBE_POINTS_SIZE = 19;
+constexpr size_t EC_PROBE_POINTS_COMMAND_SIZE = 20;
+constexpr size_t FREQUENCY_SIZE = 9;
+constexpr size_t FREQUENCY_COMMAND_SIZE = 10;
 constexpr size_t SETUP_EXT_SIZE = 17; ///< Tamaño del Setup ampliado, en bytes.
 constexpr size_t SETUP_EXT_COMMAND_SIZE = 18; ///< Tamaño de la orden de Setup ampliado, en bytes.
 constexpr size_t EC25_SIZE = 11; ///< Tamaño del resultado EC25, en bytes.
@@ -111,17 +119,26 @@ class BleApp {
    private:
     BleApp& owner_;
   };
+  class FrequencyCallbacks : public NimBLECharacteristicCallbacks {
+   public:
+    explicit FrequencyCallbacks(BleApp& owner) : owner_(owner) {}
+    void onWrite(NimBLECharacteristic*, NimBLEConnInfo&) override;
+   private:
+    BleApp& owner_;
+  };
 
   static const char* stateName(const InstrumentStatus& status);
   void publishAdvanced();
+  void publishFrequency();
   void publishStatus(bool forceNotify);
   void publishSetup(bool forceNotify);
   void publishPt100Calibration(bool forceNotify);
+  void publishEcProbePoints();
   void publishSetupResult(uint8_t requestId, AtlantesBle::SetupResult result);
   void publishCalibration();
   void publishMeasurement();
   void publishControlResult(uint8_t requestId, uint8_t operation, AtlantesBle::ControlResult result);
-  void enqueueSetupCommand(const uint8_t* data, size_t size);
+  void enqueueSetupCommand(const uint8_t* data, size_t size, bool frequency = false);
   void processSetupCommand();
   void enqueueControlCommand(const uint8_t* data, size_t size);
   void processControlCommand();
@@ -133,6 +150,10 @@ class BleApp {
   ServerCallbacks callbacks_{*this};
   CommandCallbacks commandCallbacks_{*this};
   ControlCallbacks controlCallbacks_{*this};
+  FrequencyCallbacks frequencyCallbacks_{*this};
+  NimBLECharacteristic* frequencyCharacteristic_ = nullptr;
+  uint32_t lastFrequencyLow_ = 0, lastFrequencyHigh_ = 0;
+  bool hasLastFrequency_ = false;
   NimBLECharacteristic* advancedCharacteristic_ = nullptr;
   uint8_t lastAdvanced_[AtlantesBle::ADVANCED_SIZE]{};
   bool hasLastAdvanced_ = false;
@@ -142,6 +163,9 @@ class BleApp {
   NimBLECharacteristic* ec25Characteristic_ = nullptr;
   NimBLECharacteristic* pt100ResistanceCharacteristic_ = nullptr;
   NimBLECharacteristic* pt100CalibrationCharacteristic_ = nullptr;
+  NimBLECharacteristic* ecProbePointsCharacteristic_ = nullptr;
+  uint8_t lastEcProbePoints_[AtlantesBle::EC_PROBE_POINTS_SIZE]{};
+  bool hasLastEcProbePoints_ = false;
   uint8_t lastSetupExt_[AtlantesBle::SETUP_EXT_SIZE]{};
   bool hasLastSetupExt_ = false;
   uint8_t lastPt100Calibration_[AtlantesBle::PT100_CALIBRATION_SIZE]{};
@@ -157,8 +181,9 @@ class BleApp {
   volatile bool rejectedPending_ = false;
   volatile uint8_t rejectedRequestId_ = 0;
   portMUX_TYPE commandMux_ = portMUX_INITIALIZER_UNLOCKED;
-  uint8_t command_[AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE]{};
+  uint8_t command_[AtlantesBle::EC_PROBE_POINTS_COMMAND_SIZE]{};
   size_t commandSize_ = 0;
+  bool frequencyCommand_ = false;
   char lastStatus_[AtlantesBle::STATUS_CAPACITY]{};
   uint8_t lastSetup_[AtlantesBle::SETUP_SIZE]{};
   bool hasLastSetup_ = false;

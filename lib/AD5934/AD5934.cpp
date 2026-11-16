@@ -177,14 +177,17 @@ bool AD5934::configureSweep(uint32_t startFrequencyCode, uint16_t settlingWord) 
   return writeRegister16(SETTLING_CYCLES_MSB, settlingWord);
 }
 
-bool AD5934::configureRange1PgaX1() {
+bool AD5934::configureRange1PgaX1() { return configureRangePgaX1(1); }
+
+bool AD5934::configureRangePgaX1(uint8_t range) {
+  if (range < 1 || range > 4) return fail(ErrorCode::InvalidValue, CONTROL_HIGH, Phase::Validation);
   uint16_t current;
   if (!readRegister16(CONTROL_HIGH, current)) return false;
   if (!AD5934Math::validInactiveControl(current))
     return fail(ErrorCode::InvalidValue, CONTROL_HIGH, Phase::Validation);
-  // Power-down + Range 1 (D10:D9=00) + PGA x1 (D8=1); D4 reset stays zero.
-  // Control Low remains untouched at 0x08.
-  const uint8_t high = AD5934Math::controlHighRange1PgaX1();
+  // Power-down, PGA x1, y codificaci?n de rango D10:D9: 00, 11, 01, 10.
+  const uint8_t rangeBits[] = {0, 0, 3, 1, 2};
+  const uint8_t high = static_cast<uint8_t>(0xA1 | (rangeBits[range] << 1));
   const uint8_t command[] = {CONTROL_HIGH, high};
   if (!transmit(command, sizeof(command), CONTROL_HIGH, Phase::Write)) return false;
   uint16_t verified;

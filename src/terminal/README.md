@@ -7,6 +7,7 @@ entrada y publica resultados. No accede directamente a Wire ni a los drivers.
 ```text
 help | status
 setup show | setup interval <ms>
+setup frequency [<Hz>]
 setup ec range high|low
 setup ec model raw|series|ad|analog_devices
 setup ec k <K>
@@ -22,6 +23,8 @@ normalizan a minúsculas; el buffer admite 95 caracteres más terminador. Setup
 y selección son validados por el controlador, incluida la dependencia de ambos
 sensores cuando EC25 está activa. Los errores se presentan explícitamente;
 un fallo de persistencia indica que Setup quedó aplicado en RAM.
+`setup frequency` consulta la frecuencia guardada; con un valor entero en Hz la
+actualiza mediante Setup e inicia la recalibración cuando cambia.
 
 `cal show` muestra GF legacy y coeficientes AD; los ciclos muestran
 temperatura Pt100 (IEC 60751 o recta de calibración activada en Setup) y su

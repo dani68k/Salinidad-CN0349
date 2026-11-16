@@ -14,13 +14,13 @@ constexpr uint32_t MAX_OUTPUT_FREQUENCY_HZ = 100000; ///< Límite general de fre
  * @param frequencyHz Frecuencia solicitada, en Hz.
  * @param mclkHz Frecuencia de reloj configurada, en Hz.
  * @param[out] code Palabra DDS si la conversión es válida; no cambia si falla.
- * @return true para valores no nulos dentro de los límites de frecuencia, MCLK/16 y 24 bits.
+ * @return true para valores no nulos representables en 24 bits y dentro del límite de frecuencia.
  */
 inline bool frequencyToCode(uint32_t frequencyHz, uint32_t mclkHz, uint32_t& code) {
   if (frequencyHz == 0 || mclkHz == 0 || frequencyHz > MAX_OUTPUT_FREQUENCY_HZ ||
       static_cast<uint64_t>(frequencyHz) * 16 > mclkHz) return false;
-  const uint64_t scaled = (static_cast<uint64_t>(frequencyHz) << 27) / mclkHz;
-  if (scaled > 0xFFFFFF) return false;
+  const uint64_t scaled = (static_cast<uint64_t>(frequencyHz) << 31) / mclkHz;
+  if (scaled == 0 || scaled > 0xFFFFFF) return false;
   code = static_cast<uint32_t>(scaled);
   return true;
 }
@@ -84,7 +84,7 @@ inline bool validSweepDdsCodes(uint32_t startCode, uint32_t stepCode, uint16_t i
  * @return Frecuencia efectiva calculada, en Hz; no se realiza validación de entradas.
  */
 inline double frequencyFromCode(uint32_t code, uint32_t mclkHz) {
-  return static_cast<double>(code) * mclkHz / 134217728.0;
+  return static_cast<double>(code) * mclkHz / 2147483648.0;
 }
 
 /** @brief Calcula la fase cruda de una muestra DFT.

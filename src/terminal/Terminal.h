@@ -28,6 +28,7 @@ class Terminal {
   void execute();
   void printSetup();
   void printCycle(const MeasurementCycle& cycle);
+  void printTestReading(const char* name, const SensorMeasurement& reading, bool adModel, CalibrationMode mode);
   void reply(InstrumentError error);
   static const char* errorName(InstrumentError error);
   Stream& serial_;
@@ -35,5 +36,6 @@ class Terminal {
   char input_[Config::TERMINAL_BUFFER_SIZE]{};
   size_t inputLength_ = 0;
   bool discardLine_ = false, previousWasCr_ = false, stopPending_ = false;
+  bool testMode_ = false;
   uint32_t calibrationRunId_ = 0;
 };

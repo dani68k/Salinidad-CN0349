@@ -22,8 +22,8 @@ impedancia o conductividad. ImpedanceApp coordina la secuencia.
 - `lastError()` devuelve código, fase, registro, código Wire y bytes
   completados. `validateRead/Write` permiten validar un acceso.
 
-La aplicación usa MCLK externo 1 MHz, frecuencia 2 kHz, Range 1 y PGA ×1.
-El DDS calcula `floor(frequency * 2^27 / MCLK)`; la frecuencia efectiva
+La aplicación usa MCLK externo 1 MHz, frecuencia configurable, Range 1 y PGA ×1.
+El DDS calcula `floor(frequency * 2^27 / (MCLK / 16))`; la frecuencia efectiva
 está cuantizada. El ACK I²C no demuestra la presencia física del reloj.
 
 Las lecturas usan el puntero de dirección y las escrituras multibyte se realizan

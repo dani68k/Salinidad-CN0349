@@ -40,7 +40,8 @@ bool CN0349Manager::compatible(const Conductivity::AdCalibration& c, CN0349EcRan
   const double rfb = range == CN0349EcRange::High ? 100.0 : 1000.0;
   return c.valid && c.rfbOhms == rfb && isfinite(c.gainFactorSiemensPerCode) &&
       c.gainFactorSiemensPerCode > 0 && isfinite(c.systemOffsetCode) &&
-      c.frequencyHz == p.frequencyHz && c.mclkHz == p.mclkHz && c.settlingCycles == p.settlingCycles &&
+      isfinite(c.effectiveFrequencyHz) && c.effectiveFrequencyHz > 0 && isfinite(c.frequencyHz) && c.frequencyHz > 0 &&
+      p.frequencyHz == setup_.frequencyHz && (calibrationMode_ == CalibrationMode::Test || c.frequencyHz == p.frequencyHz) && c.mclkHz == p.mclkHz && c.settlingCycles == p.settlingCycles &&
       c.excitationRange == p.excitationRange && c.pgaGain == p.pgaGain;
 }
 bool CN0349Manager::compatible(const CN0349Calibration& c, float rfb) const {
@@ -48,7 +49,8 @@ bool CN0349Manager::compatible(const CN0349Calibration& c, float rfb) const {
   return c.valid && c.state == CalibrationState::Valid && c.rfbOhms == rfb &&
       isfinite(c.gainFactorPerOhm) && c.gainFactorPerOhm > 0 &&
       isfinite(c.meanMagnitude) && c.meanMagnitude > 0 && isfinite(c.meanPhaseDeg) &&
-      c.frequencyHz == p.frequencyHz && c.mclkHz == p.mclkHz &&
+      isfinite(c.effectiveFrequencyHz) && c.effectiveFrequencyHz > 0 && isfinite(c.frequencyHz) && c.frequencyHz > 0 &&
+      p.frequencyHz == setup_.frequencyHz && (calibrationMode_ == CalibrationMode::Test || c.frequencyHz == p.frequencyHz) && c.mclkHz == p.mclkHz &&
       c.excitationRange == p.excitationRange && c.pgaGain == p.pgaGain && c.settlingCycles == p.settlingCycles;
 }
 EcRangeDiagnostic CN0349Manager::diagnoseEcRange(CN0349EcRange range, float magnitude, float effectiveFrequencyHz) const {
@@ -79,6 +81,7 @@ bool CN0349Manager::getAdCalibrationStatus(CN0349EcRange range, Conductivity::Ad
   return true;
 }
 bool CN0349Manager::validSetup(const InstrumentSetup& setup) {
+  uint32_t frequencyCode = 0;
   const auto sensors = static_cast<uint8_t>(setup.sensors), preset = static_cast<uint8_t>(setup.ecCalibration);
   const bool calibrationUnset = setup.pt100TemperatureA == 0 && setup.pt100ResistanceA == 0 &&
       setup.pt100TemperatureB == 0 && setup.pt100ResistanceB == 0;
@@ -91,26 +94,36 @@ bool CN0349Manager::validSetup(const InstrumentSetup& setup) {
       setup.pt100ResistanceB > setup.pt100ResistanceA;
   const bool validPt100Calibration = setup.pt100LinearCalibrationEnabled ?
       calibrationPointsValid : calibrationUnset || calibrationPointsValid;
-  return sensors >= 1 && sensors <= 3 && setup.intervalMs > 0 && setup.intervalMs <= 0x7fffffffUL &&
+  return AD5934::frequencyToCode(setup.frequencyHz, ImpedanceApp::Profile{}.mclkHz, frequencyCode) &&
+      AD5934::frequencyToCode(setup.frequencyLowHz, ImpedanceApp::Profile{}.mclkHz, frequencyCode) &&
+      AD5934::frequencyToCode(setup.frequencyHighHz, ImpedanceApp::Profile{}.mclkHz, frequencyCode) &&
+      sensors >= 1 && sensors <= 3 && setup.intervalMs > 0 && setup.intervalMs <= 0x7fffffffUL &&
       (setup.ecRange == CN0349EcRange::High || setup.ecRange == CN0349EcRange::Low) &&
       preset < 4 && (setup.ecRange == CN0349EcRange::High ? preset < 2 : preset >= 2) &&
       (setup.ecModel == Conductivity::Model::Raw || setup.ecModel == Conductivity::Model::SeriesR2Experimental ||
        setup.ecModel == Conductivity::Model::AnalogDevices) && isfinite(setup.nominalKPerCm) && setup.nominalKPerCm > 0 &&
       isfinite(setup.temperatureAlpha) && setup.temperatureAlpha >= 0 && setup.temperatureAlpha <= 5 &&
       fabsf(setup.temperatureAlpha * 100.0f - roundf(setup.temperatureAlpha * 100.0f)) < 0.001f &&
-      (!setup.temperatureCompensation || setup.sensors == MeasurementSensors::Both) && validPt100Calibration;
+      (!setup.temperatureCompensation || setup.sensors == MeasurementSensors::Both) && validPt100Calibration &&
+      (!setup.ecProbeCalibrationEnabled || (setup.ecProbePointsStored && setup.ecProbeHighPointsStored)) &&
+      (!setup.ecProbePointsStored || (isfinite(setup.ecProbePointA) && isfinite(setup.ecProbePointB) &&
+       setup.ecProbePointA >= 0 && setup.ecProbePointB > setup.ecProbePointA)) &&
+      (!setup.ecProbeHighPointsStored || (isfinite(setup.ecProbeHighPointA) && isfinite(setup.ecProbeHighPointB) &&
+       setup.ecProbeHighPointA >= 0 && setup.ecProbeHighPointB > setup.ecProbeHighPointA));
 }
 
 void CN0349Manager::loadSetup() {
   Preferences preferences;
   if (!preferences.begin("cn0349", true)) return;
-  uint8_t blob[34]{};
+  uint8_t blob[65]{};
   const size_t length = preferences.getBytesLength("setup");
-  const bool read = (length == 12 || length == 17 || length == 20 || length == sizeof(blob)) &&
+  const bool read = (length == 12 || length == 17 || length == 20 || length == 34 || length == 38 || length == 42 || length == 55 || length == 56 || length == sizeof(blob)) &&
       preferences.getBytes("setup", blob, length) == length;
   preferences.end();
   if (!read || !((blob[0] == 1 && length == 12) || (blob[0] == 2 && length == 20) ||
-      (blob[0] == 3 && length == 17) || (blob[0] == 4 && length == sizeof(blob))) ||
+      (blob[0] == 3 && length == 17) || (blob[0] == 4 && length == 34) ||
+      (blob[0] == 5 && length == 38) || (blob[0] == 6 && length == 42) || (blob[0] == 7 && length == 55) ||
+      (blob[0] == 8 && length == 56) || ((blob[0] == 9 || blob[0] == 10) && length == sizeof(blob))) ||
       blob[1] < 1 || blob[1] > 3 || blob[2] > 1 || blob[3] > 2) return;
   InstrumentSetup candidate = setup_;
   candidate.sensors = static_cast<MeasurementSensors>(blob[1]);
@@ -125,7 +138,7 @@ void CN0349Manager::loadSetup() {
     if (blob[12] > 1) return;
     candidate.temperatureCompensation = blob[12] != 0;
     memcpy(&candidate.temperatureAlpha, blob + 13, sizeof(float));
-  } else if (blob[0] == 4) {
+  } else if (blob[0] >= 4 && blob[0] <= 10) {
     if (blob[12] > 1 || blob[17] > 1) return;
     candidate.temperatureCompensation = blob[12] != 0;
     memcpy(&candidate.temperatureAlpha, blob + 13, sizeof(float));
@@ -134,13 +147,43 @@ void CN0349Manager::loadSetup() {
     memcpy(&candidate.pt100ResistanceA, blob + 22, sizeof(float));
     memcpy(&candidate.pt100TemperatureB, blob + 26, sizeof(float));
     memcpy(&candidate.pt100ResistanceB, blob + 30, sizeof(float));
+    if (blob[0] >= 5 && blob[0] <= 10) {
+      candidate.frequencyHz = static_cast<uint32_t>(blob[34]) | (static_cast<uint32_t>(blob[35]) << 8) |
+          (static_cast<uint32_t>(blob[36]) << 16) | (static_cast<uint32_t>(blob[37]) << 24);
+      uint32_t code = 0;
+      if (!AD5934::frequencyToCode(candidate.frequencyHz, ImpedanceApp::Profile{}.mclkHz, code))
+        candidate.frequencyHz = InstrumentSetup{}.frequencyHz;
+      candidate.frequencyLowHz = candidate.frequencyHz;
+      candidate.frequencyHighHz = candidate.frequencyHz;
+      if (blob[0] >= 6 && blob[0] <= 10) {
+        memcpy(&candidate.frequencyHighHz, blob + 38, sizeof(uint32_t));
+        if (!AD5934::frequencyToCode(candidate.frequencyHighHz, ImpedanceApp::Profile{}.mclkHz, code))
+          candidate.frequencyHighHz = InstrumentSetup{}.frequencyHighHz;
+        candidate.frequencyHz = candidate.ecRange == CN0349EcRange::High ? candidate.frequencyHighHz : candidate.frequencyLowHz;
+      }
+    }
+  }
+  if (blob[0] >= 7 && blob[0] <= 10) {
+    if (blob[42] > 1) return;
+    candidate.ecProbePointsStored = blob[42] != 0;
+    memcpy(&candidate.ecProbePointA, blob + 43, sizeof(float));
+    memcpy(&candidate.ecProbePointB, blob + 47, sizeof(float));
+    memcpy(&candidate.ecProbePointC, blob + 51, sizeof(float));
+    if (blob[0] >= 8 && blob[55] > 1) return;
+    if (blob[0] == 9 || blob[0] == 10) {
+      if (blob[64] > 1) return;
+      memcpy(&candidate.ecProbeHighPointA, blob + 56, sizeof(float));
+      memcpy(&candidate.ecProbeHighPointB, blob + 60, sizeof(float));
+      candidate.ecProbeHighPointsStored = blob[64] != 0;
+      candidate.ecProbeCalibrationEnabled = blob[0] == 10 && blob[55] != 0;
+    }
   }
   if (validSetup(candidate)) setup_ = candidate;
 }
 
 bool CN0349Manager::saveSetup() const {
-  uint8_t blob[34]{};
-  blob[0] = 4;
+  uint8_t blob[65]{};
+  blob[0] = 10;
   blob[1] = static_cast<uint8_t>(setup_.sensors);
   blob[2] = setup_.ecRange == CN0349EcRange::High ? 1 : 0;
   blob[3] = static_cast<uint8_t>(setup_.ecModel);
@@ -153,6 +196,18 @@ bool CN0349Manager::saveSetup() const {
   memcpy(blob + 22, &setup_.pt100ResistanceA, sizeof(float));
   memcpy(blob + 26, &setup_.pt100TemperatureB, sizeof(float));
   memcpy(blob + 30, &setup_.pt100ResistanceB, sizeof(float));
+  for (size_t i = 0; i < 4; ++i) {
+    blob[34 + i] = static_cast<uint8_t>(setup_.frequencyLowHz >> (8 * i));
+    blob[38 + i] = static_cast<uint8_t>(setup_.frequencyHighHz >> (8 * i));
+  }
+  blob[42] = setup_.ecProbePointsStored ? 1 : 0;
+  memcpy(blob + 43, &setup_.ecProbePointA, sizeof(float));
+  memcpy(blob + 47, &setup_.ecProbePointB, sizeof(float));
+  memcpy(blob + 51, &setup_.ecProbePointC, sizeof(float));
+  blob[55] = setup_.ecProbeCalibrationEnabled ? 1 : 0;
+  memcpy(blob + 56, &setup_.ecProbeHighPointA, sizeof(float));
+  memcpy(blob + 60, &setup_.ecProbeHighPointB, sizeof(float));
+  blob[64] = setup_.ecProbeHighPointsStored ? 1 : 0;
   Preferences preferences;
   if (!preferences.begin("cn0349", false)) return false;
   const bool written = preferences.putBytes("setup", blob, sizeof(blob)) == sizeof(blob);
@@ -160,18 +215,55 @@ bool CN0349Manager::saveSetup() const {
   return written;
 }
 
-InstrumentError CN0349Manager::setSetup(const InstrumentSetup& setup) {
+InstrumentError CN0349Manager::setSetup(const InstrumentSetup& requested) {
   if (isBusy()) return InstrumentError::Busy;
+  InstrumentSetup setup = requested;
+  if (setup.ecRange != setup_.ecRange || setup.frequencyLowHz != setup_.frequencyLowHz ||
+      setup.frequencyHighHz != setup_.frequencyHighHz) {
+    setup.frequencyHz = setup.ecRange == CN0349EcRange::High ? setup.frequencyHighHz : setup.frequencyLowHz;
+  } else if (setup.frequencyHz != setup_.frequencyHz) {
+    if (setup.ecRange == CN0349EcRange::High) setup.frequencyHighHz = setup.frequencyHz;
+    else setup.frequencyLowHz = setup.frequencyHz;
+  }
+  if (setup.frequencyLowHz != setup_.frequencyLowHz || setup.frequencyHighHz != setup_.frequencyHighHz) {
+    if (setup.frequencyLowHz != setup_.frequencyLowHz) setup.ecProbePointsStored = false;
+    if (setup.frequencyHighHz != setup_.frequencyHighHz) setup.ecProbeHighPointsStored = false;
+    setup.ecProbeCalibrationEnabled = false;
+  }
   if (!validSetup(setup)) return InstrumentError::InvalidArgument;
+  const bool frequencyChanged = setup.frequencyHz != setup_.frequencyHz;
+  const bool rangeChanged = setup.ecRange != setup_.ecRange;
+  if (frequencyChanged && !acquisition_.configureSingle(muxPreset(setup.ecCalibration),
+      setup.frequencyHz, acquisition_.profile().settlingCycles)) return InstrumentError::InvalidArgument;
   const bool changed = setup.sensors != setup_.sensors || setup.intervalMs != setup_.intervalMs ||
+      setup.frequencyHz != setup_.frequencyHz ||
+      setup.frequencyLowHz != setup_.frequencyLowHz || setup.frequencyHighHz != setup_.frequencyHighHz ||
       setup.ecRange != setup_.ecRange || setup.ecModel != setup_.ecModel || setup.nominalKPerCm != setup_.nominalKPerCm ||
       setup.temperatureCompensation != setup_.temperatureCompensation || setup.temperatureAlpha != setup_.temperatureAlpha ||
       setup.pt100LinearCalibrationEnabled != setup_.pt100LinearCalibrationEnabled ||
       setup.pt100TemperatureA != setup_.pt100TemperatureA || setup.pt100ResistanceA != setup_.pt100ResistanceA ||
-      setup.pt100TemperatureB != setup_.pt100TemperatureB || setup.pt100ResistanceB != setup_.pt100ResistanceB;
+      setup.pt100TemperatureB != setup_.pt100TemperatureB || setup.pt100ResistanceB != setup_.pt100ResistanceB ||
+      setup.ecProbePointsStored != setup_.ecProbePointsStored || setup.ecProbeCalibrationEnabled != setup_.ecProbeCalibrationEnabled || setup.ecProbePointA != setup_.ecProbePointA ||
+      setup.ecProbePointB != setup_.ecProbePointB || setup.ecProbePointC != setup_.ecProbePointC ||
+      setup.ecProbeHighPointsStored != setup_.ecProbeHighPointsStored ||
+      setup.ecProbeHighPointA != setup_.ecProbeHighPointA || setup.ecProbeHighPointB != setup_.ecProbeHighPointB;
   setup_ = setup;
-  if (changed) setupPersistenceFailed_ = !saveSetup();
+  if (changed || setupPersistenceFailed_) setupPersistenceFailed_ = !saveSetup();
+  if (frequencyChanged || rangeChanged) {
+    const InstrumentError calibrationError = runCalibration();
+    if (calibrationError != InstrumentError::None) return calibrationError;
+  }
   return setupPersistenceFailed_ ? InstrumentError::Persistence : InstrumentError::None;
+}
+InstrumentError CN0349Manager::setExcitationRange(uint8_t range) {
+  if (isBusy()) return InstrumentError::Busy;
+  return acquisition_.setExcitationRange(range) ? InstrumentError::None : InstrumentError::InvalidArgument;
+}
+InstrumentError CN0349Manager::setCalibrationMode(CalibrationMode mode) {
+  if (isBusy()) return InstrumentError::Busy;
+  if (mode != CalibrationMode::Normal && mode != CalibrationMode::Test) return InstrumentError::InvalidArgument;
+  calibrationMode_ = mode;
+  return InstrumentError::None;
 }
 InstrumentError CN0349Manager::setMeasurementSensors(MeasurementSensors sensors) {
   auto setup = setup_; setup.sensors = sensors; return setSetup(setup);
@@ -230,7 +322,7 @@ void CN0349Manager::startCalibrationSlot() {
   acquisition_.presetInfo(muxPreset(c.preset), info);
   const auto& p = acquisition_.profile();
   c.presetMask = info.mask; c.rfbOhms = info.rfbOhms; c.rcalOhms = info.rcalOhms;
-  c.frequencyHz = 2000; c.mclkHz = static_cast<float>(p.mclkHz); c.excitationRange = p.excitationRange;
+  c.frequencyHz = static_cast<float>(setup_.frequencyHz); c.mclkHz = static_cast<float>(p.mclkHz); c.excitationRange = p.excitationRange;
   c.pgaGain = p.pgaGain; c.settlingCycles = 10; c.calibrationId = nextCalibrationId_++;
   c.state = CalibrationState::Running; c.error = InstrumentError::None;
   calibrationSlotStartedMs_ = millis(); calibrationSampleStarted_ = false;
@@ -248,7 +340,7 @@ void CN0349Manager::updateCalibration() {
     if (!acquisition_.statusSnapshot().hardwareReady && !acquisition_.requestRecovery(busReady_)) {
       completeCalibrationSlot(InstrumentError::Hardware); return;
     }
-    const bool configured = acquisition_.configureSingle(muxPreset(c.preset), 2000, 10);
+    const bool configured = acquisition_.configureSingle(muxPreset(c.preset), setup_.frequencyHz, 10);
     calibrationSampleStarted_ = true;
     if (!configured || !acquisition_.requestSingle(busReady_)) c.error = acquisitionError();
     return;
@@ -257,7 +349,7 @@ void CN0349Manager::updateCalibration() {
   ImpedanceApp::Result raw{};
   if (!acquisition_.singleResult(raw)) { completeCalibrationSlot(acquisitionError()); return; }
   if (!raw.valid || !isfinite(raw.magnitude) || raw.magnitude <= 0 || !isfinite(raw.phaseDegrees) ||
-      raw.calibration.mask != c.presetMask || raw.frequencyHz != 2000 ||
+      raw.calibration.mask != c.presetMask || raw.frequencyHz != setup_.frequencyHz ||
       (c.sampleCount && !CN0349Math::sameEffectiveFrequency(c.effectiveFrequencyHz, static_cast<float>(raw.effectiveFrequencyHz)))) {
     completeCalibrationSlot(InstrumentError::MeasurementFailed); return;
   }
@@ -320,7 +412,7 @@ InstrumentError CN0349Manager::startContinuousMeasurement() {
   continuous_ = true; beginCycle(); return InstrumentError::None;
 }
 void CN0349Manager::beginCycle() {
-  cycle_ = MeasurementCycle{}; cycle_.cycleId = nextCycleId_++; cycle_.setup = setup_;
+  cycle_ = MeasurementCycle{}; cycle_.cycleId = nextCycleId_++; cycle_.setup = setup_; cycle_.calibrationMode = calibrationMode_;
   cycle_.startedMs = lastCycleStartedMs_ = millis(); cycle_.ec.sensor = MeasurementSensors::Ec;
   cycleActive_ = true; state_ = InstrumentState::Measuring;
   startSensor(selected(setup_.sensors, MeasurementSensors::Pt100) ? MeasurementSensors::Pt100 : MeasurementSensors::Ec);
@@ -349,7 +441,7 @@ void CN0349Manager::finishSensor() {
     a.real = raw.real; a.imag = raw.imaginary; a.magnitude = static_cast<float>(raw.magnitude); a.rawPhaseDeg = static_cast<float>(raw.phaseDegrees);
     a.effectiveFrequencyHz = static_cast<float>(raw.effectiveFrequencyHz);
     const bool commonValid = raw.valid && raw.calibration.mask == a.measurementMask && raw.frequencyHz == a.frequencyHz &&
-        CN0349Math::sameEffectiveFrequency(a.effectiveFrequencyHz, a.calibrationEffectiveFrequencyHz) &&
+        (cycle_.calibrationMode == CalibrationMode::Test || CN0349Math::sameEffectiveFrequency(a.effectiveFrequencyHz, a.calibrationEffectiveFrequencyHz)) &&
         isfinite(a.magnitude) && a.magnitude > 0;
     const bool needsLegacyImpedance = activeSensor_ == MeasurementSensors::Pt100 ||
         cycle_.setup.ecModel != Conductivity::Model::AnalogDevices;
@@ -369,7 +461,8 @@ void CN0349Manager::finishSensor() {
       else if (cycle_.setup.ecModel == Conductivity::Model::AnalogDevices) {
         const auto& ad = adCalibrations_[cycle_.setup.ecRange == CN0349EcRange::High ? 0 : 1];
         r.conductivity = Conductivity::convertAnalogDevices(a.magnitude, cycle_.setup.nominalKPerCm,
-            Config::EC_NOMINAL_R2_OHMS, ad, a.effectiveFrequencyHz, a.rfbOhms, a.excitationRange, a.pgaGain);
+            Config::EC_NOMINAL_R2_OHMS, ad, a.effectiveFrequencyHz, a.rfbOhms, a.excitationRange, a.pgaGain,
+            cycle_.calibrationMode == CalibrationMode::Test);
         r.valid = r.conductivity.valid;
       } else { r.conductivity = Conductivity::convert(a.apparentImpedanceOhms, cycle_.setup.nominalKPerCm,
                  cycle_.setup.ecModel, Config::EC_NOMINAL_R2_OHMS); r.valid = r.conductivity.valid; }
@@ -412,7 +505,15 @@ void CN0349Manager::finishCycle(bool cancelled) {
     const double temperature = cycle_.pt100.temperature.celsius;
     const double denominator = 1.0 + (cycle_.setup.temperatureAlpha / 100.0) * (temperature - 25.0);
     if (isfinite(ec) && isfinite(temperature) && isfinite(denominator) && denominator > 0) {
-      const double ec25 = ec / denominator;
+      double ec25 = ec / denominator;
+      if (cycle_.setup.ecProbeCalibrationEnabled) {
+        const bool high = cycle_.setup.ecRange == CN0349EcRange::High;
+        const double x1 = high ? cycle_.setup.ecProbeHighPointA : cycle_.setup.ecProbePointA;
+        const double x2 = high ? cycle_.setup.ecProbeHighPointB : cycle_.setup.ecProbePointB;
+        const double y1 = high ? 1413.0 : 147.0;
+        const double y2 = high ? 12880.0 : 1413.0;
+        ec25 = y1 + (ec25 - x1) * (y2 - y1) / (x2 - x1);
+      }
       if (isfinite(ec25) && ec25 >= 0 && ec25 <= 3.402823466e38) {
         cycle_.ec25MicroSiemens = static_cast<float>(ec25); cycle_.ec25Valid = true;
       }

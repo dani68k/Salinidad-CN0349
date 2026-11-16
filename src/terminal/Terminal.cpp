@@ -1,4 +1,5 @@
 #include "Terminal.h"
+#include "../cn0349/ImpedanceMath.h"
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
@@ -6,6 +7,15 @@
 #include <math.h>
 
 namespace {
+const char* vppNominal(uint8_t range) {
+  switch (range) {
+    case 1: return "2.0";
+    case 2: return "1.0";
+    case 3: return "0.2";
+    case 4: return "0.4";
+    default: return "unavailable";
+  }
+}
 const char* sensorsName(MeasurementSensors s) {
   return s == MeasurementSensors::Both ? "PT100 EC" : s == MeasurementSensors::Pt100 ? "PT100" : "EC";
 }
@@ -86,6 +96,9 @@ void Terminal::update() {
       serial_.print("AD LOW "); serial_.println(status.adLowValid ? "OK" : "INVALID");
       serial_.print("AD HIGH "); serial_.println(status.adHighValid ? "OK" : "INVALID");
       serial_.println(status.validCalibrations == 4 ? "READY" : "READY LIMITED");
+      const auto setup = instrument_.getSetup();
+      serial_.print("EC RANGE "); serial_.print(setup.ecRange == CN0349EcRange::High ? "HIGH" : "LOW");
+      serial_.print(" | TEST FREQUENCY "); serial_.print(setup.frequencyHz); serial_.println(" Hz");
     }
   }
   MeasurementCycle cycle;
@@ -162,11 +175,20 @@ void Terminal::execute() {
   if (count == 1 && !strcmp(args[0], "help")) {
     serial_.println("help | status");
     serial_.println("setup show | setup interval <ms>");
+    serial_.println("setup frequency [<Hz>|low|high [<Hz>]] | setup vpp [<1..4>]");
+    serial_.println("setup probe [on|off|low <A> <B>|high <A> <B>]");
     serial_.println("setup ec range high|low | setup ec model raw|series|ad | setup ec k <K>");
     serial_.println("setup compensation on|off | setup alpha <0..5>");
     serial_.println("cal status | cal show | cal run");
+    serial_.println("cal mode normal|test|show");
     serial_.println("measure show | measure set PT100|EC|PT100 EC | measure once|start|stop");
+    serial_.println("mode normal|test");
     return;
+  }
+  if (count == 2 && !strcmp(args[0], "mode") &&
+      (!strcmp(args[1], "normal") || !strcmp(args[1], "test"))) {
+    testMode_ = !strcmp(args[1], "test");
+    serial_.println(testMode_ ? "OK MODE TEST" : "OK MODE NORMAL"); return;
   }
   if (count == 1 && !strcmp(args[0], "status")) {
     const auto s = instrument_.getStatus();
@@ -174,6 +196,34 @@ void Terminal::execute() {
     serial_.print(" | "); serial_.print(sensorsName(instrument_.getSetup().sensors));
     serial_.print(" | "); serial_.print(stateName(s.state));
     serial_.print(" | CAL "); serial_.print(s.validCalibrations); serial_.println("/4"); return;
+  }
+  if (count == 3 && !strcmp(args[0], "cal") && !strcmp(args[1], "mode")) {
+    if (!strcmp(args[2], "show")) {
+      serial_.print("CAL MODE "); serial_.print(instrument_.getCalibrationMode() == CalibrationMode::Test ? "TEST" : "NORMAL");
+      const auto profile = instrument_.getImpedanceProfile();
+      uint32_t code = 0;
+      serial_.print(" | MEASURE_FREQ ");
+      if (AD5934::frequencyToCode(instrument_.getSetup().frequencyHz, profile.mclkHz, code))
+        serial_.print(static_cast<double>(code) * profile.mclkHz / 2147483648.0, 2);
+      else serial_.print("unavailable");
+      serial_.println(" Hz effective");
+      for (uint8_t i = 0; i < 4; ++i) {
+        CN0349Calibration c; instrument_.getCalibrationStatus(static_cast<CN0349Preset>(i), c);
+        static const char* names[] = {"CAL_HIGH_100R", "CAL_HIGH_1K", "CAL_LOW_1K", "CAL_LOW_10K"};
+        serial_.print(names[i]); serial_.print(" | CAL_FREQ ");
+        if (c.valid && isfinite(c.effectiveFrequencyHz) && c.effectiveFrequencyHz > 0) serial_.print(c.effectiveFrequencyHz, 2);
+        else serial_.print("unavailable");
+        serial_.println(" Hz");
+      }
+      return;
+    }
+    if (!strcmp(args[2], "normal") || !strcmp(args[2], "test")) {
+      const auto mode = !strcmp(args[2], "test") ? CalibrationMode::Test : CalibrationMode::Normal;
+      const auto error = instrument_.setCalibrationMode(mode);
+      if (error != InstrumentError::None) reply(error);
+      else serial_.println(mode == CalibrationMode::Test ? "OK CAL MODE TEST" : "OK CAL MODE NORMAL");
+      return;
+    }
   }
   if (count == 2 && !strcmp(args[0], "cal")) {
     if (!strcmp(args[1], "status")) {
@@ -251,13 +301,60 @@ void Terminal::execute() {
   if (count >= 2 && !strcmp(args[0], "setup")) {
     auto setup = instrument_.getSetup();
     if (count == 2 && !strcmp(args[1], "show")) { printSetup(); return; }
-    if (count == 3 && !strcmp(args[1], "compensation") && (!strcmp(args[2], "on") || !strcmp(args[2], "off"))) {
+    if (count == 2 && !strcmp(args[1], "probe")) {
+      serial_.print("EC PROBE "); serial_.println(setup.ecProbeCalibrationEnabled ? "ON" : "OFF");
+      if (setup.ecProbePointsStored) { serial_.print("LOW A "); serial_.print(setup.ecProbePointA, 3); serial_.print(" B "); serial_.println(setup.ecProbePointB, 3); }
+      else serial_.println("LOW POINTS UNSET");
+      if (setup.ecProbeHighPointsStored) { serial_.print("HIGH A "); serial_.print(setup.ecProbeHighPointA, 3); serial_.print(" B "); serial_.println(setup.ecProbeHighPointB, 3); }
+      else serial_.println("HIGH POINTS UNSET");
+      return;
+    }
+    if (!strcmp(args[1], "vpp") && (count == 2 || count == 3)) {
+      if (count == 3) {
+        uint32_t range = 0;
+        if (!positiveInteger(args[2], range) || range > 4) { reply(InstrumentError::InvalidArgument); return; }
+        const auto error = instrument_.setExcitationRange(static_cast<uint8_t>(range));
+        if (error != InstrumentError::None) { reply(error); return; }
+      }
+      const uint8_t range = instrument_.getImpedanceProfile().excitationRange;
+      serial_.print("VPP RANGE "); serial_.print(range); serial_.print(" | ");
+      serial_.print(vppNominal(range)); serial_.println(" Vpp nominal"); return;
+    }
+    if (count == 3 && !strcmp(args[1], "ec") && !strcmp(args[2], "range")) {
+      serial_.print("EC RANGE "); serial_.println(setup.ecRange == CN0349EcRange::High ? "HIGH" : "LOW"); return;
+    }
+    if (count == 2 && !strcmp(args[1], "frequency")) {
+      serial_.print("FREQUENCY "); serial_.print(setup.frequencyHz); serial_.println(" Hz"); return;
+    }
+    if (count == 3 && !strcmp(args[1], "frequency") &&
+        (!strcmp(args[2], "low") || !strcmp(args[2], "high"))) {
+      const bool high = !strcmp(args[2], "high");
+      serial_.print(high ? "FREQUENCY HIGH " : "FREQUENCY LOW ");
+      serial_.print(high ? setup.frequencyHighHz : setup.frequencyLowHz); serial_.println(" Hz"); return;
+    }
+    if (count == 5 && !strcmp(args[1], "probe") && (!strcmp(args[2], "low") || !strcmp(args[2], "high"))) {
+      char* endA = nullptr; char* endB = nullptr; errno = 0;
+      const float pointA = strtof(args[3], &endA); const float pointB = strtof(args[4], &endB);
+      if (errno || endA == args[3] || *endA || endB == args[4] || *endB || !isfinite(pointA) || !isfinite(pointB) || pointA < 0 || pointB <= pointA) { reply(InstrumentError::InvalidArgument); return; }
+      if (!strcmp(args[2], "low")) { setup.ecProbePointA = pointA; setup.ecProbePointB = pointB; setup.ecProbePointsStored = true; }
+      else { setup.ecProbeHighPointA = pointA; setup.ecProbeHighPointB = pointB; setup.ecProbeHighPointsStored = true; }
+    } else if (count == 3 && !strcmp(args[1], "probe") && (!strcmp(args[2], "on") || !strcmp(args[2], "off"))) {
+      setup.ecProbeCalibrationEnabled = !strcmp(args[2], "on");
+    } else if (count == 3 && !strcmp(args[1], "compensation") && (!strcmp(args[2], "on") || !strcmp(args[2], "off"))) {
       setup.temperatureCompensation = !strcmp(args[2], "on");
     } else if (count == 3 && !strcmp(args[1], "alpha")) {
       char* end = nullptr; errno = 0; setup.temperatureAlpha = strtof(args[2], &end);
       if (errno || end == args[2] || *end) { reply(InstrumentError::InvalidArgument); return; }
     } else if (count == 3 && !strcmp(args[1], "interval")) {
       if (!positiveInteger(args[2], setup.intervalMs)) { reply(InstrumentError::InvalidArgument); return; }
+    } else if (count == 3 && !strcmp(args[1], "frequency")) {
+      if (!positiveInteger(args[2], setup.frequencyHz)) { reply(InstrumentError::InvalidArgument); return; }
+    } else if (count == 4 && !strcmp(args[1], "frequency") &&
+               (!strcmp(args[2], "low") || !strcmp(args[2], "high"))) {
+      uint32_t frequency = 0;
+      if (!positiveInteger(args[3], frequency)) { reply(InstrumentError::InvalidArgument); return; }
+      if (!strcmp(args[2], "high")) setup.frequencyHighHz = frequency;
+      else setup.frequencyLowHz = frequency;
     } else if (count == 4 && !strcmp(args[1], "ec")) {
       if (!strcmp(args[2], "range") && (!strcmp(args[3], "high") || !strcmp(args[3], "low"))) {
         setup.ecRange = !strcmp(args[3], "high") ? CN0349EcRange::High : CN0349EcRange::Low;
@@ -274,7 +371,10 @@ void Terminal::execute() {
         }
       } else { reply(InstrumentError::InvalidArgument); return; }
     } else { reply(InstrumentError::InvalidArgument); return; }
-    reply(instrument_.setSetup(setup)); return;
+    const auto result = instrument_.setSetup(setup);
+    reply(result);
+    if (instrument_.getStatus().state == InstrumentState::Calibrating) serial_.println("CALIBRATING - PLEASE WAIT");
+    return;
   }
   reply(InstrumentError::InvalidArgument);
 }
@@ -282,6 +382,11 @@ void Terminal::printSetup() {
   const auto s = instrument_.getSetup();
   serial_.print("SENSORS "); serial_.println(sensorsName(s.sensors));
   serial_.print("INTERVAL "); serial_.print(s.intervalMs); serial_.println(" ms");
+  serial_.print("FREQUENCY "); serial_.print(s.frequencyHz); serial_.println(" Hz");
+  serial_.print("FREQUENCY LOW "); serial_.print(s.frequencyLowHz); serial_.println(" Hz");
+  serial_.print("FREQUENCY HIGH "); serial_.print(s.frequencyHighHz); serial_.println(" Hz");
+  const uint8_t range = instrument_.getImpedanceProfile().excitationRange;
+  serial_.print("VPP RANGE "); serial_.print(range); serial_.print(" | "); serial_.print(vppNominal(range)); serial_.println(" Vpp nominal");
   serial_.print("EC RANGE "); serial_.println(s.ecRange == CN0349EcRange::High ? "HIGH" : "LOW");
   serial_.print("EC MODEL "); serial_.println(modelName(s.ecModel));
   serial_.print("EC K "); serial_.print(s.nominalKPerCm, 3); serial_.println(" cm-1");
@@ -314,5 +419,61 @@ void Terminal::printCycle(const MeasurementCycle& c) {
     else serial_.print("unavailable");
   }
   if (c.valid) serial_.print(" | OK");
+  serial_.println();
+  if (testMode_ || c.calibrationMode == CalibrationMode::Test) {
+    if (pt) printTestReading("PT100", c.pt100, false, c.calibrationMode);
+    if (ec) printTestReading("EC", c.ec, c.setup.ecModel == Conductivity::Model::AnalogDevices, c.calibrationMode);
+    if (c.intervalExceeded) serial_.println("WARN INTERVAL_EXCEEDED");
+  }
+}
+void Terminal::printTestReading(const char* name, const SensorMeasurement& r, bool adModel, CalibrationMode mode) {
+  const auto& a = r.acquisition;
+  static const char* presets[] = {"CAL_HIGH_100R", "CAL_HIGH_1K", "CAL_LOW_1K", "CAL_LOW_10K"};
+  const auto preset = static_cast<uint8_t>(a.calibrationPreset);
+  serial_.print("TEST "); serial_.print(name);
+  serial_.print(" | CAL_MODE "); serial_.print(mode == CalibrationMode::Test ? "TEST" : "NORMAL");
+  serial_.print(" | CAL_FREQ ");
+  if (a.calibrationEffectiveFrequencyHz > 0) serial_.print(a.calibrationEffectiveFrequencyHz, 2); else serial_.print("unavailable");
+  serial_.print(" Hz | MEASURE_FREQ ");
+  if (a.effectiveFrequencyHz > 0) serial_.print(a.effectiveFrequencyHz, 2); else serial_.print("unavailable");
+  serial_.print(" Hz | CAL_FREQ_MISMATCH ");
+  const bool frequenciesKnown = isfinite(a.calibrationEffectiveFrequencyHz) && a.calibrationEffectiveFrequencyHz > 0 &&
+      isfinite(a.effectiveFrequencyHz) && a.effectiveFrequencyHz > 0;
+  const bool mismatch = frequenciesKnown && !CN0349Math::sameEffectiveFrequency(a.calibrationEffectiveFrequencyHz, a.effectiveFrequencyHz);
+  serial_.print(!frequenciesKnown ? "UNKNOWN" : mismatch ? "YES" : "NO");
+  if (mismatch) serial_.print(" | EXPERIMENTAL NOT VALIDATED");
+  serial_.print(" | FREQ "); serial_.print(a.frequencyHz, 2); serial_.print(" Hz | EFFECTIVE ");
+  if (a.effectiveFrequencyHz > 0) serial_.print(a.effectiveFrequencyHz, 2); else serial_.print("unavailable");
+  serial_.print(" Hz | PRESET "); serial_.print(preset < 4 ? presets[preset] : "UNKNOWN");
+  serial_.print(" | PGA x"); serial_.print(a.pgaGain);
+  serial_.print(" | AMPLITUDE ");
+  serial_.print(vppNominal(a.excitationRange)); serial_.print(" Vpp nominal");
+  serial_.print(" | REAL ");
+  if (a.effectiveFrequencyHz > 0) serial_.print(a.real); else serial_.print("unavailable");
+  serial_.print(" | IMAG ");
+  if (a.effectiveFrequencyHz > 0) serial_.print(a.imag); else serial_.print("unavailable");
+  serial_.print(" | MAG RAW ");
+  if (a.effectiveFrequencyHz > 0) serial_.print(a.magnitude, 2); else serial_.print("unavailable");
+  serial_.print(" | IMPEDANCE ");
+  if (a.valid && !adModel) { serial_.print(a.apparentImpedanceOhms, 2); serial_.print(" ohm"); }
+  else serial_.print("unavailable");
+  if (r.sensor == MeasurementSensors::Ec) {
+    serial_.print(" | EC ");
+    if (r.valid) { serial_.print(r.conductivity.microSiemensPerCm, 1); serial_.print(" uS/cm"); }
+    else serial_.print("unavailable");
+  }
+  serial_.print(" | STATUS ");
+  if (r.valid) serial_.print("OK");
+  else if (r.sensor == MeasurementSensors::Ec && r.conductivity.error != Conductivity::Error::NotRun)
+    serial_.print(conductivityErrorName(r.conductivity.error));
+  else serial_.print(errorName(r.error));
+  if (a.hardwareError != ImpedanceDiagnostics::ErrorCode::None) {
+    serial_.print(" | HW "); serial_.print(ImpedanceDiagnostics::errorName(a.hardwareError));
+  }
+  if (r.sensor == MeasurementSensors::Ec && a.valid) {
+    static const char* diagnostics[] = {"INVALID_CAL", "IN_RANGE", "NEAR_LIMIT", "BELOW_RANGE", "ABOVE_RANGE"};
+    const auto diagnostic = static_cast<uint8_t>(r.ecRangeDiagnostic);
+    serial_.print(" | RANGE "); serial_.print(diagnostic < 5 ? diagnostics[diagnostic] : "UNKNOWN");
+  }
   serial_.println();
 }

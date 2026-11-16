@@ -22,9 +22,9 @@ desde el contexto cooperativo de `update()`.
 ## Setup y persistencia
 
 `InstrumentSetup` incluye sensores, intervalo, rango, preset de calibración EC,
-modelo, K, compensación EC25 y calibración lineal Pt100. Valores iniciales:
+modelo, K, frecuencia, compensación EC25 y calibración lineal Pt100. Valores iniciales:
 ambos sensores, 1000 ms, LOW, CAL_LOW_10K, RAW, K=1 cm⁻¹, compensación OFF,
-alpha=2 %/°C y calibración Pt100 OFF.
+alpha=2 %/°C, frecuencia 2000 Hz y calibración Pt100 OFF.
 
 `setSetup()` rechaza cambios mientras hay trabajo activo; valida selección,
 intervalo 1–2147483647 ms, rango/preset compatibles, modelo, K finita positiva
@@ -33,7 +33,11 @@ sensores. Si la recta Pt100 está activa, exige que el punto A sea menor que B
 en temperatura y resistencia; las temperaturas deben estar entre −200 y 850 °C
 y las resistencias ser positivas. Así la pendiente m es positiva. La conversión
 lineal extrapola fuera de los puntos. Guarda los cambios en Preferences, namespace
-`cn0349`, blob versión 4; `loadSetup()` admite formatos anteriores. Si guardar falla, Setup permanece
+`cn0349`, blob versión 5; `loadSetup()` admite formatos anteriores con frecuencia
+predeterminada de 2000 Hz. La frecuencia se valida mediante la conversión DDS con
+MCLK de 1 MHz (1–7812 Hz); si la frecuencia guardada no es válida se usa 2000 Hz.
+Al cambiarla se invalidan las calibraciones y se inicia una nueva calibración;
+las medidas esperan a que las cuatro referencias sean válidas. Si guardar falla, Setup permanece
 aplicado en RAM y se devuelve `Persistence`. No se escribe si no cambian los
 campos persistidos; las calibraciones electrónicas y mediciones no se persisten.
 

@@ -9,6 +9,9 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div id="calibration-overlay" class="calibration-overlay" role="status" aria-live="polite" hidden>
+    <div class="calibration-dialog"><strong>Please wait</strong><p>Calibration in process…</p></div>
+  </div>
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="instrument-header">
     <div class="header-inner">
@@ -65,8 +68,10 @@
             </article>
             <article class="result-card">
               <p id="ec-title" class="eyebrow">Conductivity with RAW</p>
-              <p id="ec-result" class="reading-value">—</p>
-              <p id="ec25-result" class="ec25-result" hidden>EC25: —</p>
+              <div class="ec-readings">
+                <p id="ec-result" class="reading-value">—</p>
+                <p id="ec25-result" class="ec25-result" hidden>EC25: —</p>
+              </div>
               <p id="ec-range-recommendation" class="ec-range-recommendation" hidden></p>
             </article>
           </div>
@@ -111,9 +116,8 @@
               <label for="sensors">Sensors<select id="sensors"><option value="1">PT100</option><option value="2">EC</option><option value="3">PT100 + EC</option></select></label>
             </div>
             <div class="temperature-compensation">
-              <p class="eyebrow">TEMPERATURE COMPENSATION</p>
+              <div class="card-heading"><p class="eyebrow">TEMPERATURE COMPENSATION</p><label class="calibration-switch" for="temperature-compensation"><input id="temperature-compensation" type="checkbox"><span>Enable</span></label></div>
               <div class="setup-grid">
-                <label for="temperature-compensation">Enable EC temperature compensation<select id="temperature-compensation"><option value="0">OFF</option><option value="1">ON</option></select></label>
                 <label for="reference-temperature">Reference temperature (°C)<input id="reference-temperature" type="number" value="25.0" readonly></label>
                 <label for="temperature-alpha">Temperature coefficient (%/°C)<input id="temperature-alpha" type="number" min="0" max="5" step="0.01" value="2.00" required></label>
               </div>
@@ -124,21 +128,6 @@
               <div class="button-row"><button id="cancel" type="button" class="button secondary">CANCEL</button><button id="apply" type="submit" class="button primary">APPLY</button></div>
             </div>
           </form>
-        </section>
-        <section class="card setup-card advanced-card" aria-labelledby="advanced-title">
-          <div class="card-heading"><div><p class="eyebrow">AD5934 PROFILE</p><h2 id="advanced-title">Advanced setup</h2></div><span class="status-badge" data-state="muted">READ ONLY</span></div>
-          <p class="hint">Configured acquisition profile; not a live hardware readback.</p>
-          <dl class="advanced-grid">
-            <div><dt>MCLK (Hz)</dt><dd id="advanced-mclk">&mdash;</dd></div>
-            <div><dt>Start frequency (Hz)</dt><dd id="advanced-start">&mdash;</dd></div>
-            <div><dt>Frequency step (Hz)</dt><dd id="advanced-step">&mdash;</dd></div>
-            <div><dt>Number of increments</dt><dd id="advanced-increments">&mdash;</dd></div>
-            <div><dt>Settling cycles</dt><dd id="advanced-settling">&mdash;</dd></div>
-            <div><dt>Output range</dt><dd id="advanced-range">&mdash;</dd></div>
-            <div><dt>Excitation Vpp nominal</dt><dd id="advanced-vpp">&mdash;</dd></div>
-            <div><dt>PGA gain</dt><dd id="advanced-pga">&mdash;</dd></div>
-            <div><dt>Measurement mode</dt><dd id="advanced-mode">&mdash;</dd></div>
-          </dl>
           <section class="pt100-calibration" aria-labelledby="pt100-calibration-title">
             <div class="card-heading">
               <div><p class="eyebrow">PT100</p><h2 id="pt100-calibration-title">Linear calibration</h2></div>
@@ -161,6 +150,45 @@
               <button id="pt100-calibration-save" type="button" class="button primary">SAVE CALIBRATION</button>
             </div>
           </section>
+        </section>
+        <section class="card setup-card advanced-card" aria-labelledby="advanced-title">
+          <div class="card-heading"><div><p class="eyebrow">AD5934 PROFILE</p><h2 id="advanced-title">Advanced setup</h2></div><span class="status-badge" data-state="muted">PROFILE READ ONLY</span></div>
+          <p class="hint">Configured acquisition profile; not a live hardware readback.</p>
+          <dl class="advanced-grid">
+            <div><dt>MCLK (Hz)</dt><dd id="advanced-mclk">&mdash;</dd></div>
+            <div><dt>Start frequency (Hz)</dt><dd id="advanced-start">&mdash;</dd></div>
+            <div><dt>Frequency step (Hz)</dt><dd id="advanced-step">&mdash;</dd></div>
+            <div><dt>Number of increments</dt><dd id="advanced-increments">&mdash;</dd></div>
+            <div><dt>Settling cycles</dt><dd id="advanced-settling">&mdash;</dd></div>
+            <div><dt>Output range</dt><dd id="advanced-range">&mdash;</dd></div>
+            <div><dt>Excitation Vpp nominal</dt><dd id="advanced-vpp">&mdash;</dd></div>
+            <div><dt>PGA gain</dt><dd id="advanced-pga">&mdash;</dd></div>
+            <div><dt>Measurement mode</dt><dd id="advanced-mode">&mdash;</dd></div>
+          </dl>
+          <section class="pt100-calibration" aria-labelledby="frequency-title">
+            <div class="card-heading"><div><p class="eyebrow">AD5934</p><h2 id="frequency-title">Test frequency</h2></div></div>
+            <div class="setup-grid"><label for="frequency-low-input">LOW range frequency (Hz)<input id="frequency-low-input" type="number" min="1" max="7812" step="1" disabled></label><label for="frequency-high-input">HIGH range frequency (Hz)<input id="frequency-high-input" type="number" min="1" max="7812" step="1" disabled></label></div>
+            <p id="frequency-state" class="hint" aria-live="polite">Connect to the instrument to change frequencies.</p>
+            <div class="setup-footer"><button id="frequency-save" type="button" class="button primary" disabled>APPLY FREQUENCY</button></div>
+          </section>
+          <section class="pt100-calibration" aria-labelledby="ec-calibration-title">
+            <div class="card-heading"><div><p class="eyebrow">EC PROBE</p><h2 id="ec-calibration-title">Linear calibration</h2></div><label class="calibration-switch" for="ec-calibration-enabled"><input id="ec-calibration-enabled" type="checkbox" disabled><span>Enable</span></label></div>
+            <p class="hint">With probe calibration OFF and temperature compensation ON, enter the EC25 reading for each standard and range.</p>
+            <div class="setup-grid ec-calibration-grid">
+              <label for="ec-calibration-low-a">LOW A · 147 µS/cm<input id="ec-calibration-low-a" type="number" min="0" step="any" placeholder="EC25 reading (µS/cm)" disabled></label>
+              <label for="ec-calibration-low-b">LOW B · 1413 µS/cm<input id="ec-calibration-low-b" type="number" min="0" step="any" placeholder="EC25 reading (µS/cm)" disabled></label>
+              <label for="ec-calibration-high-a">HIGH A · 1413 µS/cm<input id="ec-calibration-high-a" type="number" min="0" step="any" placeholder="EC25 reading (µS/cm)" disabled></label>
+              <label for="ec-calibration-high-b">HIGH B · 12880 µS/cm<input id="ec-calibration-high-b" type="number" min="0" step="any" placeholder="EC25 reading (µS/cm)" disabled></label>
+            </div>
+            <p class="hint">X = measured EC25; Y = reference EC at 25 °C (µS/cm). Correction applies to EC25 when temperature compensation is ON.</p>
+            <p id="ec-calibration-low-equation" class="hint" aria-live="polite">LOW (A–B): Enter valid readings for A and B.</p>
+            <p id="ec-calibration-high-equation" class="hint" aria-live="polite">HIGH (A–B): Enter valid readings for A and B.</p>
+            <div class="setup-footer">
+              <p id="ec-calibration-state" class="hint">Connect to the instrument to view or save readings.</p>
+              <button id="ec-calibration-save" type="button" class="button primary" disabled>SAVE CALIBRATION</button>
+            </div>
+          </section>
+
         </section>
         </div>
         <section class="card setup-card display-settings" aria-label="Measurement display settings">

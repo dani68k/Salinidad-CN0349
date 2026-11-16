@@ -23,6 +23,7 @@ enum class InstrumentState : uint8_t { NotInitialized, Calibrating, Idle, Measur
 enum class CalibrationState : uint8_t { Invalid, Running, Valid };
 /** @brief Ruta de medida de conductividad. */
 enum class CN0349EcRange : uint8_t { High, Low };
+enum class CalibrationMode : uint8_t { Normal, Test };
 /** @brief Selección de sensores; Both incluye Pt100 y EC. */
 enum class MeasurementSensors : uint8_t { Pt100 = 1, Ec = 2, Both = 3 };
 /** @brief Diagnóstico de magnitud DFT EC frente al intervalo calibrado.
@@ -106,6 +107,8 @@ struct CN0349ImpedanceResult {
 struct InstrumentSetup {
   MeasurementSensors sensors = MeasurementSensors::Both; ///< Sensores seleccionados.
   uint32_t intervalMs = 1000; ///< Periodo de inicio entre ciclos, en ms.
+  uint32_t frequencyHz = 2000; ///< Frecuencia solicitada, en Hz.
+  uint32_t frequencyLowHz = 2000, frequencyHighHz = 2000; ///< Frecuencias por rango EC.
   CN0349EcRange ecRange = CN0349EcRange::Low; ///< Ruta EC.
   CN0349Preset ecCalibration = CN0349Preset::CalLow10K; ///< Referencia EC elegida.
   Conductivity::Model ecModel = Conductivity::Model::Raw; ///< Modelo de conversión EC.
@@ -115,6 +118,11 @@ struct InstrumentSetup {
   bool pt100LinearCalibrationEnabled = false; ///< Activa la recta de calibración Pt100.
   float pt100TemperatureA = 0, pt100ResistanceA = 0; ///< Punto A patrón, °C y Ω.
   float pt100TemperatureB = 0, pt100ResistanceB = 0; ///< Punto B patrón, °C y Ω.
+  bool ecProbePointsStored = false;
+  bool ecProbeCalibrationEnabled = false;
+  float ecProbePointA = 0, ecProbePointB = 0, ecProbePointC = 0;
+  bool ecProbeHighPointsStored = false;
+  float ecProbeHighPointA = 0, ecProbeHighPointB = 0;
 };
 /** @brief Resultado individual de Pt100 o EC dentro de un ciclo. */
 struct SensorMeasurement {
@@ -133,6 +141,7 @@ struct MeasurementCycle {
   uint32_t cycleId = 0; ///< Identificador incremental desde el arranque.
   uint32_t startedMs = 0, finishedMs = 0; ///< Inicio y fin según millis(), en ms.
   InstrumentSetup setup{}; ///< Configuración congelada al iniciar el ciclo.
+  CalibrationMode calibrationMode = CalibrationMode::Normal;
   SensorMeasurement pt100{}, ec{}; ///< Resultados de Pt100 y EC del ciclo.
   bool valid = false; ///< Todos los sensores seleccionados son válidos.
   bool cancelled = false; ///< Ciclo cancelado antes de completar.
@@ -177,6 +186,10 @@ class CN0349Manager {
   InstrumentStatus getStatus() const;
   /** @brief Devuelve una copia del Setup aplicado en RAM. */
   InstrumentSetup getSetup() const { return setup_; }
+  CalibrationMode getCalibrationMode() const { return calibrationMode_; }
+  InstrumentError setCalibrationMode(CalibrationMode mode);
+  /** Selecciona el rango de excitaci?n 1..4 en RAM; Busy durante una operaci?n. */
+  InstrumentError setExcitationRange(uint8_t range);
   /** @brief Devuelve el perfil configurado, sin leer registros de hardware. */
   ImpedanceApp::Profile getImpedanceProfile() const { return acquisition_.profile(); }
   /** @brief Valida y aplica el Setup completo; persiste cambios efectivos.
@@ -253,6 +266,7 @@ class CN0349Manager {
   bool initialized_ = false, busReady_ = false;
   bool continuous_ = false, cycleActive_ = false, sensorStarted_ = false;
   bool calibrationPending_ = false;
+  CalibrationMode calibrationMode_ = CalibrationMode::Normal;
   InstrumentState state_ = InstrumentState::NotInitialized;
   InstrumentError lastError_ = InstrumentError::None;
   InstrumentSetup setup_{};

@@ -5,7 +5,8 @@
   Actualmente declara versión 1.0.0 e identificador 3B. No contiene el Setup
   mutable; este reside en `CN0349Manager`.
 - `ad5934_math.h`: funciones puras de conversión DDS, frecuencia efectiva,
-  decodificación y magnitud/fase DFT, validación de barrido y control.
+  decodificación y magnitud/fase DFT, validación de barrido y control. La conversión
+  DDS usa `MCLK / 16` y una palabra de 24 bits.
 - `impedance_diagnostics.h`: códigos y registros de error, subsistema,
   recuperación y contadores utilizados por ImpedanceApp.
 

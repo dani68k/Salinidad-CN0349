@@ -122,7 +122,8 @@ inline AdCalibration calibrateAnalogDevices(double nLow, double nHigh, double yL
  */
 inline Result convertAnalogDevices(double magnitudeCode, double nominalKPerCm, double r2Ohms,
                                    const AdCalibration& calibration, double measurementFrequencyHz,
-                                   double expectedRfbOhms, uint8_t excitationRange, uint8_t pgaGain) {
+                                   double expectedRfbOhms, uint8_t excitationRange, uint8_t pgaGain,
+                                   bool allowFrequencyMismatch = false) {
   Result result;
   result.model = Model::AnalogDevices; result.magnitudeCode = magnitudeCode;
   result.nominalKPerCm = static_cast<float>(nominalKPerCm); result.r2Ohms = static_cast<float>(r2Ohms);
@@ -133,8 +134,9 @@ inline Result convertAnalogDevices(double magnitudeCode, double nominalKPerCm, d
       calibration.gainFactorSiemensPerCode <= 0 || !isfinite(calibration.systemOffsetCode)) {
     result.error = Error::CalibrationInvalid; return result;
   }
-  if (!isfinite(measurementFrequencyHz) || !isfinite(expectedRfbOhms) ||
-      fabs(calibration.effectiveFrequencyHz - measurementFrequencyHz) > 0.01 ||
+  if (!isfinite(measurementFrequencyHz) || measurementFrequencyHz <= 0 ||
+      !isfinite(calibration.effectiveFrequencyHz) || calibration.effectiveFrequencyHz <= 0 || !isfinite(expectedRfbOhms) ||
+      (!allowFrequencyMismatch && fabs(calibration.effectiveFrequencyHz - measurementFrequencyHz) > 0.01) ||
       calibration.rfbOhms != expectedRfbOhms || calibration.excitationRange != excitationRange ||
       calibration.pgaGain != pgaGain) { result.error = Error::CalibrationMismatch; return result; }
   if (!isfinite(magnitudeCode)) { result.error = Error::InvalidMagnitude; return result; }

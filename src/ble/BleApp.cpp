@@ -29,6 +29,10 @@ void BleApp::ControlCallbacks::onWrite(NimBLECharacteristic* characteristic, Nim
   const NimBLEAttValue value = characteristic->getValue();
   owner_.enqueueControlCommand(value.data(), value.size());
 }
+void BleApp::FrequencyCallbacks::onWrite(NimBLECharacteristic* characteristic, NimBLEConnInfo&) {
+  const NimBLEAttValue value = characteristic->getValue();
+  owner_.enqueueSetupCommand(value.data(), value.size(), true);
+}
 
 const char* BleApp::stateName(const InstrumentStatus& status) {
   switch (status.state) {
@@ -71,6 +75,10 @@ void BleApp::begin() {
   NimBLECharacteristic* pt100CalibrationCommand = service->createCharacteristic(
       AtlantesBle::PT100_CALIBRATION_COMMAND_UUID, NIMBLE_PROPERTY::WRITE,
       AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE);
+  ecProbePointsCharacteristic_ = service->createCharacteristic(
+      AtlantesBle::EC_PROBE_POINTS_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY, AtlantesBle::EC_PROBE_POINTS_SIZE);
+  NimBLECharacteristic* ecProbePointsCommand = service->createCharacteristic(
+      AtlantesBle::EC_PROBE_POINTS_COMMAND_UUID, NIMBLE_PROPERTY::WRITE, AtlantesBle::EC_PROBE_POINTS_COMMAND_SIZE);
   pt100ResistanceCharacteristic_ = service->createCharacteristic(
       AtlantesBle::PT100_RESISTANCE_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
       AtlantesBle::PT100_RESISTANCE_SIZE);
@@ -95,9 +103,13 @@ void BleApp::begin() {
   advancedCharacteristic_ = service->createCharacteristic(
       AtlantesBle::ADVANCED_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY,
       AtlantesBle::ADVANCED_SIZE);
+  frequencyCharacteristic_ = service->createCharacteristic(
+      AtlantesBle::FREQUENCY_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY, AtlantesBle::FREQUENCY_SIZE);
+  NimBLECharacteristic* frequencyCommand = service->createCharacteristic(
+      AtlantesBle::FREQUENCY_COMMAND_UUID, NIMBLE_PROPERTY::WRITE, AtlantesBle::FREQUENCY_COMMAND_SIZE);
   initialized_ = setupExtCommand && setupExtCharacteristic_ && ec25Characteristic_ &&
-      pt100CalibrationCharacteristic_ && pt100CalibrationCommand && pt100ResistanceCharacteristic_ &&
-      advancedCharacteristic_ && statusCharacteristic_ &&
+      pt100CalibrationCharacteristic_ && pt100CalibrationCommand && pt100ResistanceCharacteristic_ && ecProbePointsCharacteristic_ && ecProbePointsCommand &&
+      advancedCharacteristic_ && frequencyCharacteristic_ && frequencyCommand && statusCharacteristic_ &&
       setupCharacteristic_ && commandCharacteristic && setupResultCharacteristic_ &&
       calibrationCharacteristic_ && measurementCharacteristic_ && ecDiagnosticCharacteristic_ &&
       controlCommandCharacteristic && controlResultCharacteristic_;
@@ -105,9 +117,12 @@ void BleApp::begin() {
   commandCharacteristic->setCallbacks(&commandCallbacks_);
   setupExtCommand->setCallbacks(&commandCallbacks_);
   pt100CalibrationCommand->setCallbacks(&commandCallbacks_);
+  ecProbePointsCommand->setCallbacks(&commandCallbacks_);
   controlCommandCharacteristic->setCallbacks(&controlCallbacks_);
+  frequencyCommand->setCallbacks(&frequencyCallbacks_);
 
   publishAdvanced();
+  publishFrequency();
   publishStatus(false);
   publishSetup(false);
   publishSetupResult(0, AtlantesBle::SetupResult::Ok);
@@ -126,6 +141,7 @@ void BleApp::begin() {
   emptyPt100Resistance[0] = AtlantesBle::PROTOCOL_VERSION;
   pt100ResistanceCharacteristic_->setValue(emptyPt100Resistance, sizeof(emptyPt100Resistance));
   publishPt100Calibration(false);
+  publishEcProbePoints();
   service->start();
   NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
   advertising->setName(AtlantesBle::DEVICE_NAME);
@@ -149,10 +165,39 @@ void BleApp::update() {
   processControlCommand();
   publishCalibration();
   publishAdvanced();
+  publishFrequency();
   publishStatus(false);
   publishSetup(false);
   publishPt100Calibration(false);
+  publishEcProbePoints();
   publishMeasurement();
+}
+
+void BleApp::publishEcProbePoints() {
+  const InstrumentSetup setup = instrument_.getSetup();
+  uint8_t payload[AtlantesBle::EC_PROBE_POINTS_SIZE] = {AtlantesBle::PROTOCOL_VERSION, static_cast<uint8_t>((setup.ecProbePointsStored ? 1 : 0) | (setup.ecProbeHighPointsStored ? 2 : 0))};
+  memcpy(payload + 2, &setup.ecProbePointA, sizeof(float));
+  memcpy(payload + 6, &setup.ecProbePointB, sizeof(float));
+  memcpy(payload + 10, &setup.ecProbeHighPointA, sizeof(float));
+  memcpy(payload + 14, &setup.ecProbeHighPointB, sizeof(float));
+  payload[18] = static_cast<uint8_t>(setup.ecProbeCalibrationEnabled);
+  if (hasLastEcProbePoints_ && memcmp(payload, lastEcProbePoints_, sizeof(payload)) == 0) return;
+  memcpy(lastEcProbePoints_, payload, sizeof(payload)); hasLastEcProbePoints_ = true;
+  ecProbePointsCharacteristic_->setValue(payload, sizeof(payload));
+  if (connected_) ecProbePointsCharacteristic_->notify();
+}
+
+void BleApp::publishFrequency() {
+  const InstrumentSetup& setup = instrument_.getSetup();
+  if (hasLastFrequency_ && lastFrequencyLow_ == setup.frequencyLowHz && lastFrequencyHigh_ == setup.frequencyHighHz) return;
+  uint8_t payload[AtlantesBle::FREQUENCY_SIZE] = {AtlantesBle::PROTOCOL_VERSION};
+  for (size_t i = 0; i < 4; ++i) {
+    payload[i + 1] = static_cast<uint8_t>(setup.frequencyLowHz >> (8 * i));
+    payload[i + 5] = static_cast<uint8_t>(setup.frequencyHighHz >> (8 * i));
+  }
+  lastFrequencyLow_ = setup.frequencyLowHz; lastFrequencyHigh_ = setup.frequencyHighHz; hasLastFrequency_ = true;
+  frequencyCharacteristic_->setValue(payload, sizeof(payload));
+  if (connected_) frequencyCharacteristic_->notify();
 }
 
 void BleApp::publishAdvanced() {
@@ -466,7 +511,7 @@ void BleApp::processControlCommand() {
   publishControlResult(requestId, operation, controlResult(error));
 }
 
-void BleApp::enqueueSetupCommand(const uint8_t* data, size_t size) {
+void BleApp::enqueueSetupCommand(const uint8_t* data, size_t size, bool frequency) {
   const uint8_t requestId = size > 1 ? data[1] : 0;
   portENTER_CRITICAL(&commandMux_);
   if (commandPending_) {
@@ -476,6 +521,7 @@ void BleApp::enqueueSetupCommand(const uint8_t* data, size_t size) {
     return;
   }
   commandSize_ = size;
+  frequencyCommand_ = frequency;
   const size_t copySize = size > sizeof(command_) ? sizeof(command_) : size;
   if (copySize) memcpy(command_, data, copySize);
   commandPending_ = true;
@@ -483,39 +529,72 @@ void BleApp::enqueueSetupCommand(const uint8_t* data, size_t size) {
 }
 
 void BleApp::processSetupCommand() {
-  bool rejected = false, hasCommand = false;
+  bool rejected = false, hasCommand = false, frequency = false;
   uint8_t rejectedRequestId = 0, requestId = 0,
-      command[AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE]{};
+      command[AtlantesBle::EC_PROBE_POINTS_COMMAND_SIZE]{};
   size_t size = 0;
   portENTER_CRITICAL(&commandMux_);
   if (rejectedPending_) {
     rejected = true; rejectedRequestId = rejectedRequestId_; rejectedPending_ = false;
   }
   if (commandPending_) {
-    hasCommand = true; size = commandSize_;
+    hasCommand = true; size = commandSize_; frequency = frequencyCommand_;
     if (size > 1) requestId = command_[1];
-    if (size == AtlantesBle::SETUP_COMMAND_SIZE || size == AtlantesBle::SETUP_EXT_COMMAND_SIZE ||
-        size == AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE) memcpy(command, command_, size);
+    if (size <= sizeof(command)) memcpy(command, command_, size);
     commandPending_ = false;
   }
   portEXIT_CRITICAL(&commandMux_);
   if (rejected) publishSetupResult(rejectedRequestId, AtlantesBle::SetupResult::Busy);
   if (!hasCommand) return;
-  if (size != AtlantesBle::SETUP_COMMAND_SIZE && size != AtlantesBle::SETUP_EXT_COMMAND_SIZE &&
-      size != AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE) {
+  if ((frequency && size != AtlantesBle::FREQUENCY_COMMAND_SIZE) ||
+      (!frequency && size != AtlantesBle::SETUP_COMMAND_SIZE && size != AtlantesBle::SETUP_EXT_COMMAND_SIZE &&
+       size != AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE && size != AtlantesBle::EC_PROBE_POINTS_COMMAND_SIZE)) {
     publishSetupResult(requestId, AtlantesBle::SetupResult::InvalidLength); return;
   }
   if (command[0] != AtlantesBle::PROTOCOL_VERSION) {
     publishSetupResult(requestId, AtlantesBle::SetupResult::UnsupportedVersion); return;
   }
   const InstrumentStatus status = instrument_.getStatus();
-  if (status.state != InstrumentState::Idle || !status.hardwareReady) {
+  if ((!frequency && (status.state != InstrumentState::Idle || !status.hardwareReady)) ||
+      (frequency && status.state != InstrumentState::Idle && status.state != InstrumentState::Error)) {
     publishSetupResult(requestId, AtlantesBle::SetupResult::NotReady); return;
   }
   if (instrument_.isBusy()) {
     publishSetupResult(requestId, AtlantesBle::SetupResult::Busy); return;
   }
   InstrumentSetup setup = instrument_.getSetup();
+  if (!frequency && size == AtlantesBle::EC_PROBE_POINTS_COMMAND_SIZE) {
+    if (command[2] > 3 || command[3] > 1) { publishSetupResult(requestId, AtlantesBle::SetupResult::InvalidValue); return; }
+    setup.ecProbePointsStored = (command[2] & 1) != 0;
+    setup.ecProbeHighPointsStored = (command[2] & 2) != 0;
+    setup.ecProbeCalibrationEnabled = command[3] != 0;
+    memcpy(&setup.ecProbePointA, command + 4, sizeof(float));
+    memcpy(&setup.ecProbePointB, command + 8, sizeof(float));
+    memcpy(&setup.ecProbeHighPointA, command + 12, sizeof(float));
+    memcpy(&setup.ecProbeHighPointB, command + 16, sizeof(float));
+    const InstrumentError error = instrument_.setSetup(setup);
+    if (error == InstrumentError::None || error == InstrumentError::Persistence) {
+      publishEcProbePoints();
+      publishSetupResult(requestId, error == InstrumentError::None ? AtlantesBle::SetupResult::Ok : AtlantesBle::SetupResult::Persistence);
+    } else if (error == InstrumentError::Busy) publishSetupResult(requestId, AtlantesBle::SetupResult::Busy);
+    else if (error == InstrumentError::InvalidArgument) publishSetupResult(requestId, AtlantesBle::SetupResult::InvalidValue);
+    else publishSetupResult(requestId, AtlantesBle::SetupResult::InternalError);
+    return;
+  }
+  if (frequency) {
+    setup.frequencyLowHz = static_cast<uint32_t>(command[2]) | (static_cast<uint32_t>(command[3]) << 8) |
+        (static_cast<uint32_t>(command[4]) << 16) | (static_cast<uint32_t>(command[5]) << 24);
+    setup.frequencyHighHz = static_cast<uint32_t>(command[6]) | (static_cast<uint32_t>(command[7]) << 8) |
+        (static_cast<uint32_t>(command[8]) << 16) | (static_cast<uint32_t>(command[9]) << 24);
+    const InstrumentError error = instrument_.setSetup(setup);
+    if (error == InstrumentError::None || error == InstrumentError::Persistence) {
+      publishFrequency();
+      publishSetupResult(requestId, error == InstrumentError::None ? AtlantesBle::SetupResult::Ok : AtlantesBle::SetupResult::Persistence);
+    } else if (error == InstrumentError::Busy) publishSetupResult(requestId, AtlantesBle::SetupResult::Busy);
+    else if (error == InstrumentError::InvalidArgument) publishSetupResult(requestId, AtlantesBle::SetupResult::InvalidValue);
+    else publishSetupResult(requestId, AtlantesBle::SetupResult::InternalError);
+    return;
+  }
   if (size == AtlantesBle::PT100_CALIBRATION_COMMAND_SIZE) {
     if (command[2] > 1) { publishSetupResult(requestId, AtlantesBle::SetupResult::InvalidValue); return; }
     setup.pt100LinearCalibrationEnabled = command[2] != 0;

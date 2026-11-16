@@ -94,6 +94,8 @@ h2 { margin: 4px 0 0; font-size: 1rem; font-weight: 600; }
 #ec25-legend[hidden] { display: none; }
 .legend-ec25 { background: #d7a7ff; }
 .ec25-result { margin: 6px 0 0; color: #d7e3ec; font-size: .8rem; }
+.ec-readings { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; column-gap: 18px; }
+.ec-readings .ec25-result { color: #f1f7fb; font-size: clamp(1.25rem, 2.2vw, 1.8rem); font-variant-numeric: tabular-nums; font-weight: 550; }
 .temperature-compensation { margin-top: 20px; padding-top: 16px; border-top: 1px solid #2a4357; }
 .temperature-compensation .setup-grid { margin-top: 12px; }
 .compensation-warning { margin: 10px 0 0; color: #f4a65a; font-size: .75rem; }
@@ -113,6 +115,10 @@ h2 { margin: 4px 0 0; font-size: 1rem; font-weight: 600; }
 .pt100-calibration .card-heading { align-items: center; }
 .pt100-calibration .hint { margin: 12px 0; }
 .pt100-calibration-grid { margin-top: 14px; }
+.calibration-overlay:not([hidden]) { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: rgba(0, 0, 0, .7); }
+.calibration-dialog { padding: 24px 32px; border: 1px solid #2a4357; border-radius: 12px; background: #142635; text-align: center; }
+.calibration-dialog p { margin: 10px 0 0; }
+.setup-grid.ec-calibration-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .calibration-switch { display: flex; grid-template-columns: auto auto; align-items: center; gap: 8px; cursor: pointer; }
 .calibration-switch input { width: 18px; min-height: 18px; height: 18px; accent-color: #42c8ff; }
 .pt100-calibration .setup-footer { margin-top: 16px; }
@@ -199,6 +205,7 @@ td { color: #dce7ef; font-size: .78rem; }
   .result-card { min-height: 64px; padding: 6px 10px; }
   .result-card .eyebrow { font-size: .56rem; }
   .reading-value { margin-top: 3px; font-size: clamp(1.05rem, 2vw, 1.5rem); }
+  .ec-readings .ec25-result { margin-top: 3px; font-size: clamp(1.05rem, 2vw, 1.5rem); }
   .history-card { margin-top: 6px; padding: 8px 12px 6px; }
   .history-card .card-heading h2 { font-size: .88rem; }
   .measurement-chart { height: 145px; margin-top: 4px; }
