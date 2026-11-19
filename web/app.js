@@ -12,8 +12,8 @@ const PT100_CALIBRATION_UUID = '8d7b0010-6f7a-4f31-9c4d-2b6e6a7f3a10';
 const PT100_CALIBRATION_COMMAND_UUID = '8d7b0011-6f7a-4f31-9c4d-2b6e6a7f3a10';
 const FREQUENCY_UUID = '8d7b0012-6f7a-4f31-9c4d-2b6e6a7f3a10';
 const FREQUENCY_COMMAND_UUID = '8d7b0013-6f7a-4f31-9c4d-2b6e6a7f3a10';
-const EC_PROBE_POINTS_UUID = '8d7b0014-6f7a-4f31-9c4d-2b6e6a7f3a10';
-const EC_PROBE_POINTS_COMMAND_UUID = '8d7b0015-6f7a-4f31-9c4d-2b6e6a7f3a10';
+const EC_PROBE_POINTS_UUID = '8d7b0016-6f7a-4f31-9c4d-2b6e6a7f3a10';
+const EC_PROBE_POINTS_COMMAND_UUID = '8d7b0017-6f7a-4f31-9c4d-2b6e6a7f3a10';
 const ui = { compatibility: $('#compatibility'), connect: $('#connect'), disconnect: $('#disconnect'), connection: $('#connection'), connectionDot: $('#connection-dot'),
   instrument: $('#instrument'), cal: $('#cal'), busy: $('#busy'), error: $('#error'), form: $('#setup-form'), interval: $('#interval'),
   range: $('#range'), model: $('#model'), cellK: $('#cell-k'), apply: $('#apply'), cancel: $('#cancel'), pending: $('#pending'),
@@ -46,7 +46,7 @@ async function initializeOptionalSetup(){
   if(!connected())return;
   try{await initializeFrequency();}catch(problem){ch.frequency=null;ch.frequencyCommand=null;$('#frequency-state').textContent=`Frequency control unavailable: ${problem.message||problem}. Check firmware and reconnect.`;availability();}
   if(!connected())return;
-  try{await initializeEcProbePoints();}catch(problem){ch.ecProbePoints=null;ch.ecProbePointsCommand=null;$('#ec-calibration-state').textContent='EC point storage unavailable. Check firmware and reconnect.';availability();}
+  try{await initializeEcProbePoints();}catch(problem){ch.ecProbePoints=null;ch.ecProbePointsCommand=null;$('#ec-calibration-state').textContent='EC calibration unavailable. Update firmware and reconnect.';availability();}
 }
 function setupDraft() { return { sensors: Number(ui.sensors.value), interval: Number(ui.interval.value), range: Number(ui.range.value), model: Number(ui.model.value), cellK: Number(ui.cellK.value), compensation: $('#temperature-compensation').checked, alpha: Number($('#temperature-alpha').value) }; }
 function sameSetup(a,b) { return a && b && a.sensors===b.sensors && a.interval===b.interval && a.range===b.range && a.model===b.model && a.compensation===b.compensation && Math.abs(a.alpha-b.alpha)<1e-5 && Math.abs(a.cellK-b.cellK)<=Math.max(1e-6,Math.abs(a.cellK)*1e-6); }
@@ -62,7 +62,7 @@ function availability() {
   $('#pt100-calibration-save').disabled=!calibrationCanEdit||!pt100CalibrationChanged();
   const ecCanEdit=canEdit&&!pendingSetup&&Boolean(ch.ecProbePoints&&ch.ecProbePointsCommand);
   $('#ec-calibration-enabled').disabled=!ecCanEdit;
-  for(const id of ['low-a','low-b','high-a','high-b'])$(`#ec-calibration-${id}`).disabled=!ecCanEdit;
+  for(const id of ['low-m','low-b','high-m','high-b'])$(`#ec-calibration-${id}`).disabled=!ecCanEdit;
   $('#ec-calibration-save').disabled=!ecCanEdit;
   const frequencyCanEdit=ready()&&Boolean(ch.frequency&&ch.frequencyCommand)&&Boolean(appliedFrequency);
   $('#frequency-low-input').disabled=!frequencyCanEdit;
@@ -72,13 +72,13 @@ function availability() {
 }
 
 function showEcProbePoints(value){
-  if(value.byteLength!==19||value.getUint8(0)!==VERSION||value.getUint8(1)>3||value.getUint8(18)>1)throw Error('EC probe points invalid');
+  if(value.byteLength!==19||value.getUint8(0)!==VERSION||value.getUint8(1)>3||value.getUint8(18)>1)throw Error('EC calibration invalid');
   const mask=value.getUint8(1);
   ecProbePoints=[value.getFloat32(2,true),value.getFloat32(6,true),value.getFloat32(10,true),value.getFloat32(14,true)];
   $('#ec-calibration-enabled').checked=Boolean(value.getUint8(18));
-  for(const [index,id] of ['low-a','low-b','high-a','high-b'].entries())$(`#ec-calibration-${id}`).value=(mask&(index<2?1:2))?String(ecProbePoints[index]):'';
+  for(const [index,id] of ['low-m','low-b','high-m','high-b'].entries())$(`#ec-calibration-${id}`).value=(mask&(index<2?1:2))?String(ecProbePoints[index]):'';
   updateEcCalibrationPreview();
-  $('#ec-calibration-state').textContent=mask===3?`Readings stored on the instrument. EC25 calibration is ${value.getUint8(18)?'ON':'OFF'}.`:'Enter both points for each range to enable EC correction.';
+  $('#ec-calibration-state').textContent=mask===3?`Coefficients stored on the instrument. EC25 calibration is ${value.getUint8(18)?'ON':'OFF'}.`:'Enter m and b for each range to enable EC correction.';
   availability();
 }
 async function initializeEcProbePoints(){
@@ -94,14 +94,14 @@ async function initializeEcProbePoints(){
 }
 async function saveEcProbePoints(){
   if(!ready()||pendingSetup||!ch.ecProbePointsCommand)return;
-  const inputs=['low-a','low-b','high-a','high-b'].map(id=>$(`#ec-calibration-${id}`).value.trim());
+  const inputs=['low-m','low-b','high-m','high-b'].map(id=>$(`#ec-calibration-${id}`).value.trim());
   const points=inputs.map(value=>Math.fround(Number(value)));
   const mask=(inputs[0]!==''&&inputs[1]!==''?1:0)|(inputs[2]!==''&&inputs[3]!==''?2:0);
   if(inputs.some((value,index)=>value===''&&inputs[index^1]!=='')||!points.every(Number.isFinite)||
-      (mask&1&&(points[0]<0||points[1]<=points[0]))||(mask&2&&(points[2]<0||points[3]<=points[2]))||($('#ec-calibration-enabled').checked&&mask!==3)){
-    $('#ec-calibration-state').textContent='Enter valid A < B pairs for each range; both pairs are required to enable correction.';return;
+      (mask&1&&points[0]<=0)||(mask&2&&points[2]<=0)||($('#ec-calibration-enabled').checked&&mask!==3)){
+    $('#ec-calibration-state').textContent='Enter finite m and b values with m > 0; both ranges are required to enable correction.';return;
   }
-  applying=true;availability();error(null);$('#ec-calibration-state').textContent='Saving readings…';
+  applying=true;availability();error(null);$('#ec-calibration-state').textContent='Saving coefficients…';
   try{
     const id=requestId=++requestId&255,packet=new ArrayBuffer(20),view=new DataView(packet),ack=wait('setup',id);
     view.setUint8(0,VERSION);view.setUint8(1,id);view.setUint8(2,mask);view.setUint8(3,$('#ec-calibration-enabled').checked?1:0);
@@ -110,7 +110,7 @@ async function saveEcProbePoints(){
     showEcProbePoints(await ch.ecProbePoints.readValue());
   }catch(problem){
     if(pendingSetup){clearTimeout(pendingSetup.timer);pendingSetup=null;}
-    error(problem);$('#ec-calibration-state').textContent=problem.message==='PERSISTENCE'?'Applied in memory, but saving failed.':`Unable to save readings: ${problem.message||problem}`;
+    error(problem);$('#ec-calibration-state').textContent=problem.message==='PERSISTENCE'?'Applied in memory, but saving failed.':`Unable to save coefficients: ${problem.message||problem}`;
   }finally{applying=false;availability();}
 }
 
@@ -178,14 +178,14 @@ function renderAdvanced(value) {
 }
 
 function updateEcCalibrationPreview(){
-  const read=id=>{const value=$(`#ec-calibration-${id}`).value.trim();return value===''?null:Number(value);};
-  for(const [range,y1,y2] of [['low',147,1413],['high',1413,12880]]){
-    const first='a',second='b',x1=read(`${range}-a`),x2=read(`${range}-b`),label=`${range.toUpperCase()} (A–B)`;
+  for(const range of ['low','high']){
+    const m=$(`#ec-calibration-${range}-m`).value.trim(),b=$(`#ec-calibration-${range}-b`).value.trim();
     const output=$(`#ec-calibration-${range}-equation`);
-    if(x1===null||x2===null){output.textContent=`${label}: Enter valid readings for ${first.toUpperCase()} and ${second.toUpperCase()}.`;continue;}
-    if(!Number.isFinite(x1)||!Number.isFinite(x2)||x1<0||x2<=x1){output.textContent=`${label}: Readings must be non-negative and increase from ${first.toUpperCase()} to ${second.toUpperCase()}.`;continue;}
-    const m=(y2-y1)/(x2-x1),b=y1-m*x1;
-    output.textContent=`${label}: Y = ${m.toPrecision(6)} X ${b<0?'-':'+'} ${Math.abs(b).toPrecision(6)} (m = ${m.toPrecision(6)}, b = ${b.toPrecision(6)})`;
+    if(m===''||b===''){output.textContent=`${range.toUpperCase()}: Enter m and b.`;continue;}
+    const slope=Number(m),offset=Number(b);
+    output.textContent=Number.isFinite(slope)&&slope>0&&Number.isFinite(offset)?
+      `${range.toUpperCase()}: corrected EC25 = ${slope} * EC25 ${offset<0?'-':'+'} ${Math.abs(offset)} uS/cm`:
+      `${range.toUpperCase()}: m must be positive and both coefficients must be finite.`;
   }
 }
 function pt100CalibrationDraft(){
@@ -421,14 +421,14 @@ function showMeasurement(value){
 }
 
 async function connect(){error(null);setConnection('CONNECTING…',false);ui.connect.disabled=true;try{device=await navigator.bluetooth.requestDevice({filters:[{name:'CN0349'}],optionalServices:[UUID.service]});device.addEventListener('gattserverdisconnected',disconnectEvent);const server=await device.gatt.connect(),service=await server.getPrimaryService(UUID.service);for(const [key,id] of Object.entries(UUID))if(key!=='service'&&key!=='advanced'&&key!=='ecDiagnostic'&&key!=='setupExt'&&key!=='ec25'&&key!=='pt100Resistance'&&key!=='setupExtCommand')ch[key]=await service.getCharacteristic(id);try{ch.advanced=await service.getCharacteristic(UUID.advanced);ch.advanced.addEventListener('characteristicvaluechanged',e=>{try{renderAdvanced(e.target.value);}catch(problem){error(problem);}});await ch.advanced.startNotifications();renderAdvanced(await ch.advanced.readValue());}catch(e){ch.advanced=null;renderAdvanced(null);}try{ch.ecDiagnostic=await service.getCharacteristic(UUID.ecDiagnostic);ch.ecDiagnostic.addEventListener('characteristicvaluechanged',e=>showEcDiagnostic(e.target.value));await ch.ecDiagnostic.startNotifications();showEcDiagnostic(await ch.ecDiagnostic.readValue());}catch(_){ch.ecDiagnostic=null;latestEcDiagnostic=null;}try{ch.setupExt=await service.getCharacteristic(UUID.setupExt);ch.setupExtCommand=await service.getCharacteristic(UUID.setupExtCommand);ch.setupExt.addEventListener('characteristicvaluechanged',e=>{try{renderSetup(decodeSetup(e.target.value));}catch(problem){error(problem);}});await ch.setupExt.startNotifications();}catch(_){ch.setupExt=null;ch.setupExtCommand=null;}try{ch.ec25=await service.getCharacteristic(UUID.ec25);ch.ec25.addEventListener('characteristicvaluechanged',e=>showEc25(e.target.value));await ch.ec25.startNotifications();showEc25(await ch.ec25.readValue());}catch(_){ch.ec25=null;latestEc25=null;}try{ch.pt100Resistance=await service.getCharacteristic(UUID.pt100Resistance);pt100ResistanceAvailable=true;ch.pt100Resistance.addEventListener('characteristicvaluechanged',e=>showPt100Resistance(e.target.value));await ch.pt100Resistance.startNotifications();showPt100Resistance(await ch.pt100Resistance.readValue());}catch(_){ch.pt100Resistance=null;pt100ResistanceAvailable=false;latestPt100Resistance=null;}showStatus(await ch.status.readValue());renderSetup(await readSetup());await readCalibration();showMeasurement(await ch.measurement.readValue());for(const [key,handler] of [['status',e=>showStatus(e.target.value)],['setup',e=>{if(ch.setupExt)return;try{renderSetup(decodeSetup(e.target.value));}catch(problem){error(problem);}}],['setupResult',setupResult],['measurement',e=>showMeasurement(e.target.value)],['controlResult',controlResult]]){await ch[key].startNotifications();ch[key].addEventListener('characteristicvaluechanged',handler);}setConnection('CONNECTED',true);availability();}catch(e){error(e);if(device?.gatt?.connected)device.gatt.disconnect();setConnection('DISCONNECTED',false);}}
-function disconnectEvent(){$('#calibration-overlay').hidden=true;ecProbePoints=null;$('#ec-calibration-enabled').checked=false;for(const id of ['low-a','low-b','high-a','high-b'])$('#ec-calibration-'+id).value='';updateEcCalibrationPreview();$('#ec-calibration-state').textContent='Connect to the instrument to view or save readings.';clearTimeout(pendingEcTimer);pendingEc=null;renderAdvanced(null);setConnection('DISCONNECTED',false);ch={};state=null;busy=false;appliedSetup=null;latestEc=null;latestEcDiagnostic=null;latestEc25=null;latestPt100Resistance=null;latestMeasurementCycle=null;latestPt100Selected=false;pt100ResistanceAvailable=false;previousCalibrationCount=null;measurementHistory=[];ui.ecResult.dataset.rangeDiagnostic='';$('#ec-range-recommendation').hidden=true;$('#ec25-result').hidden=true;$('#pt-resistance-result').hidden=true;ui.ptResult.textContent='—';ui.ecResult.textContent='—';ui.cycle.textContent='Waiting for data...';renderHistory();if(pendingSetup){clearTimeout(pendingSetup.timer);pendingSetup.reject(Error('BLE disconnected'));pendingSetup=null;}if(pendingControl){clearTimeout(pendingControl.timer);pendingControl.reject(Error('BLE disconnected'));pendingControl=null;}availability();}
+function disconnectEvent(){$('#calibration-overlay').hidden=true;ecProbePoints=null;$('#ec-calibration-enabled').checked=false;for(const id of ['low-m','low-b','high-m','high-b'])$('#ec-calibration-'+id).value='';updateEcCalibrationPreview();$('#ec-calibration-state').textContent='Connect to the instrument to view or save coefficients.';clearTimeout(pendingEcTimer);pendingEc=null;renderAdvanced(null);setConnection('DISCONNECTED',false);ch={};state=null;busy=false;appliedSetup=null;latestEc=null;latestEcDiagnostic=null;latestEc25=null;latestPt100Resistance=null;latestMeasurementCycle=null;latestPt100Selected=false;pt100ResistanceAvailable=false;previousCalibrationCount=null;measurementHistory=[];ui.ecResult.dataset.rangeDiagnostic='';$('#ec-range-recommendation').hidden=true;$('#ec25-result').hidden=true;$('#pt-resistance-result').hidden=true;ui.ptResult.textContent='—';ui.ecResult.textContent='—';ui.cycle.textContent='Waiting for data...';renderHistory();if(pendingSetup){clearTimeout(pendingSetup.timer);pendingSetup.reject(Error('BLE disconnected'));pendingSetup=null;}if(pendingControl){clearTimeout(pendingControl.timer);pendingControl.reject(Error('BLE disconnected'));pendingControl=null;}availability();}
 
 ui.connect.onclick=connect;ui.disconnect.onclick=()=>device?.gatt?.disconnect();ui.form.oninput=pendingLabel;ui.form.onsubmit=applySetup;ui.cancel.onclick=()=>appliedSetup&&renderSetup(appliedSetup);
 $('#pt100-calibration-save').onclick=applyPt100Calibration;
 $('#ec-calibration-save').onclick=saveEcProbePoints;
 $('#frequency-save').onclick=applyFrequency;
 for(const id of ['frequency-low-input','frequency-high-input'])$(`#${id}`).oninput=availability;
-for(const id of ['low-a','low-b','high-a','high-b'])$(`#ec-calibration-${id}`).oninput=updateEcCalibrationPreview;
+for(const id of ['low-m','low-b','high-m','high-b'])$(`#ec-calibration-${id}`).oninput=updateEcCalibrationPreview;
 for(const id of ['pt100-linear-enabled','pt100-temp-a','pt100-resistance-a','pt100-temp-b','pt100-resistance-b'])$(`#${id}`).oninput=updatePt100CalibrationPreview;
 ui.ecDisplay.onchange=renderEc;
 $('#clear-history').onclick=()=>{measurementHistory=[];renderHistory();};

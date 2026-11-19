@@ -303,9 +303,9 @@ void Terminal::execute() {
     if (count == 2 && !strcmp(args[1], "show")) { printSetup(); return; }
     if (count == 2 && !strcmp(args[1], "probe")) {
       serial_.print("EC PROBE "); serial_.println(setup.ecProbeCalibrationEnabled ? "ON" : "OFF");
-      if (setup.ecProbePointsStored) { serial_.print("LOW A "); serial_.print(setup.ecProbePointA, 3); serial_.print(" B "); serial_.println(setup.ecProbePointB, 3); }
+      if (setup.ecProbePointsStored) { serial_.print("LOW m "); serial_.print(setup.ecProbeLowM, 6); serial_.print(" b "); serial_.println(setup.ecProbeLowB, 6); }
       else serial_.println("LOW POINTS UNSET");
-      if (setup.ecProbeHighPointsStored) { serial_.print("HIGH A "); serial_.print(setup.ecProbeHighPointA, 3); serial_.print(" B "); serial_.println(setup.ecProbeHighPointB, 3); }
+      if (setup.ecProbeHighPointsStored) { serial_.print("HIGH m "); serial_.print(setup.ecProbeHighM, 6); serial_.print(" b "); serial_.println(setup.ecProbeHighB, 6); }
       else serial_.println("HIGH POINTS UNSET");
       return;
     }
@@ -336,8 +336,8 @@ void Terminal::execute() {
       char* endA = nullptr; char* endB = nullptr; errno = 0;
       const float pointA = strtof(args[3], &endA); const float pointB = strtof(args[4], &endB);
       if (errno || endA == args[3] || *endA || endB == args[4] || *endB || !isfinite(pointA) || !isfinite(pointB) || pointA < 0 || pointB <= pointA) { reply(InstrumentError::InvalidArgument); return; }
-      if (!strcmp(args[2], "low")) { setup.ecProbePointA = pointA; setup.ecProbePointB = pointB; setup.ecProbePointsStored = true; }
-      else { setup.ecProbeHighPointA = pointA; setup.ecProbeHighPointB = pointB; setup.ecProbeHighPointsStored = true; }
+      if (!strcmp(args[2], "low")) { setup.ecProbeLowM = 1266.0 / (static_cast<double>(pointB) - pointA); setup.ecProbeLowB = 147.0 - setup.ecProbeLowM * static_cast<double>(pointA); setup.ecProbePointsStored = true; }
+      else { setup.ecProbeHighM = 11467.0 / (static_cast<double>(pointB) - pointA); setup.ecProbeHighB = 1413.0 - setup.ecProbeHighM * static_cast<double>(pointA); setup.ecProbeHighPointsStored = true; }
     } else if (count == 3 && !strcmp(args[1], "probe") && (!strcmp(args[2], "on") || !strcmp(args[2], "off"))) {
       setup.ecProbeCalibrationEnabled = !strcmp(args[2], "on");
     } else if (count == 3 && !strcmp(args[1], "compensation") && (!strcmp(args[2], "on") || !strcmp(args[2], "off"))) {

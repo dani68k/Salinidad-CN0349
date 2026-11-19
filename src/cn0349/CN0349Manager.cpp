@@ -106,10 +106,10 @@ bool CN0349Manager::validSetup(const InstrumentSetup& setup) {
       fabsf(setup.temperatureAlpha * 100.0f - roundf(setup.temperatureAlpha * 100.0f)) < 0.001f &&
       (!setup.temperatureCompensation || setup.sensors == MeasurementSensors::Both) && validPt100Calibration &&
       (!setup.ecProbeCalibrationEnabled || (setup.ecProbePointsStored && setup.ecProbeHighPointsStored)) &&
-      (!setup.ecProbePointsStored || (isfinite(setup.ecProbePointA) && isfinite(setup.ecProbePointB) &&
-       setup.ecProbePointA >= 0 && setup.ecProbePointB > setup.ecProbePointA)) &&
-      (!setup.ecProbeHighPointsStored || (isfinite(setup.ecProbeHighPointA) && isfinite(setup.ecProbeHighPointB) &&
-       setup.ecProbeHighPointA >= 0 && setup.ecProbeHighPointB > setup.ecProbeHighPointA));
+      (!setup.ecProbePointsStored || (isfinite(setup.ecProbeLowM) && isfinite(setup.ecProbeLowB) &&
+       setup.ecProbeLowM > 0)) &&
+      (!setup.ecProbeHighPointsStored || (isfinite(setup.ecProbeHighM) && isfinite(setup.ecProbeHighB) &&
+       setup.ecProbeHighM > 0));
 }
 
 void CN0349Manager::loadSetup() {
@@ -123,7 +123,7 @@ void CN0349Manager::loadSetup() {
   if (!read || !((blob[0] == 1 && length == 12) || (blob[0] == 2 && length == 20) ||
       (blob[0] == 3 && length == 17) || (blob[0] == 4 && length == 34) ||
       (blob[0] == 5 && length == 38) || (blob[0] == 6 && length == 42) || (blob[0] == 7 && length == 55) ||
-      (blob[0] == 8 && length == 56) || ((blob[0] == 9 || blob[0] == 10) && length == sizeof(blob))) ||
+      (blob[0] == 8 && length == 56) || ((blob[0] == 9 || blob[0] == 10 || blob[0] == 11) && length == sizeof(blob))) ||
       blob[1] < 1 || blob[1] > 3 || blob[2] > 1 || blob[3] > 2) return;
   InstrumentSetup candidate = setup_;
   candidate.sensors = static_cast<MeasurementSensors>(blob[1]);
@@ -138,7 +138,7 @@ void CN0349Manager::loadSetup() {
     if (blob[12] > 1) return;
     candidate.temperatureCompensation = blob[12] != 0;
     memcpy(&candidate.temperatureAlpha, blob + 13, sizeof(float));
-  } else if (blob[0] >= 4 && blob[0] <= 10) {
+  } else if (blob[0] >= 4 && blob[0] <= 11) {
     if (blob[12] > 1 || blob[17] > 1) return;
     candidate.temperatureCompensation = blob[12] != 0;
     memcpy(&candidate.temperatureAlpha, blob + 13, sizeof(float));
@@ -147,7 +147,7 @@ void CN0349Manager::loadSetup() {
     memcpy(&candidate.pt100ResistanceA, blob + 22, sizeof(float));
     memcpy(&candidate.pt100TemperatureB, blob + 26, sizeof(float));
     memcpy(&candidate.pt100ResistanceB, blob + 30, sizeof(float));
-    if (blob[0] >= 5 && blob[0] <= 10) {
+    if (blob[0] >= 5 && blob[0] <= 11) {
       candidate.frequencyHz = static_cast<uint32_t>(blob[34]) | (static_cast<uint32_t>(blob[35]) << 8) |
           (static_cast<uint32_t>(blob[36]) << 16) | (static_cast<uint32_t>(blob[37]) << 24);
       uint32_t code = 0;
@@ -155,7 +155,7 @@ void CN0349Manager::loadSetup() {
         candidate.frequencyHz = InstrumentSetup{}.frequencyHz;
       candidate.frequencyLowHz = candidate.frequencyHz;
       candidate.frequencyHighHz = candidate.frequencyHz;
-      if (blob[0] >= 6 && blob[0] <= 10) {
+      if (blob[0] >= 6 && blob[0] <= 11) {
         memcpy(&candidate.frequencyHighHz, blob + 38, sizeof(uint32_t));
         if (!AD5934::frequencyToCode(candidate.frequencyHighHz, ImpedanceApp::Profile{}.mclkHz, code))
           candidate.frequencyHighHz = InstrumentSetup{}.frequencyHighHz;
@@ -163,19 +163,33 @@ void CN0349Manager::loadSetup() {
       }
     }
   }
-  if (blob[0] >= 7 && blob[0] <= 10) {
+  if (blob[0] >= 7 && blob[0] <= 11) {
     if (blob[42] > 1) return;
     candidate.ecProbePointsStored = blob[42] != 0;
-    memcpy(&candidate.ecProbePointA, blob + 43, sizeof(float));
-    memcpy(&candidate.ecProbePointB, blob + 47, sizeof(float));
+    memcpy(&candidate.ecProbeLowM, blob + 43, sizeof(float));
+    memcpy(&candidate.ecProbeLowB, blob + 47, sizeof(float));
     memcpy(&candidate.ecProbePointC, blob + 51, sizeof(float));
     if (blob[0] >= 8 && blob[55] > 1) return;
-    if (blob[0] == 9 || blob[0] == 10) {
+    if (blob[0] >= 9) {
       if (blob[64] > 1) return;
-      memcpy(&candidate.ecProbeHighPointA, blob + 56, sizeof(float));
-      memcpy(&candidate.ecProbeHighPointB, blob + 60, sizeof(float));
+      memcpy(&candidate.ecProbeHighM, blob + 56, sizeof(float));
+      memcpy(&candidate.ecProbeHighB, blob + 60, sizeof(float));
       candidate.ecProbeHighPointsStored = blob[64] != 0;
-      candidate.ecProbeCalibrationEnabled = blob[0] == 10 && blob[55] != 0;
+      candidate.ecProbeCalibrationEnabled = blob[0] >= 10 && blob[55] != 0;
+    }
+    if (blob[0] < 11) {
+      if (candidate.ecProbePointsStored) {
+        const double a = candidate.ecProbeLowM, b = candidate.ecProbeLowB;
+        if (!isfinite(a) || !isfinite(b) || a < 0 || b <= a) return;
+        candidate.ecProbeLowM = static_cast<float>(1266.0 / (b - a));
+        candidate.ecProbeLowB = static_cast<float>(147.0 - candidate.ecProbeLowM * a);
+      }
+      if (candidate.ecProbeHighPointsStored) {
+        const double a = candidate.ecProbeHighM, b = candidate.ecProbeHighB;
+        if (!isfinite(a) || !isfinite(b) || a < 0 || b <= a) return;
+        candidate.ecProbeHighM = static_cast<float>(11467.0 / (b - a));
+        candidate.ecProbeHighB = static_cast<float>(1413.0 - candidate.ecProbeHighM * a);
+      }
     }
   }
   if (validSetup(candidate)) setup_ = candidate;
@@ -183,7 +197,7 @@ void CN0349Manager::loadSetup() {
 
 bool CN0349Manager::saveSetup() const {
   uint8_t blob[65]{};
-  blob[0] = 10;
+  blob[0] = 11;
   blob[1] = static_cast<uint8_t>(setup_.sensors);
   blob[2] = setup_.ecRange == CN0349EcRange::High ? 1 : 0;
   blob[3] = static_cast<uint8_t>(setup_.ecModel);
@@ -201,12 +215,12 @@ bool CN0349Manager::saveSetup() const {
     blob[38 + i] = static_cast<uint8_t>(setup_.frequencyHighHz >> (8 * i));
   }
   blob[42] = setup_.ecProbePointsStored ? 1 : 0;
-  memcpy(blob + 43, &setup_.ecProbePointA, sizeof(float));
-  memcpy(blob + 47, &setup_.ecProbePointB, sizeof(float));
+  memcpy(blob + 43, &setup_.ecProbeLowM, sizeof(float));
+  memcpy(blob + 47, &setup_.ecProbeLowB, sizeof(float));
   memcpy(blob + 51, &setup_.ecProbePointC, sizeof(float));
   blob[55] = setup_.ecProbeCalibrationEnabled ? 1 : 0;
-  memcpy(blob + 56, &setup_.ecProbeHighPointA, sizeof(float));
-  memcpy(blob + 60, &setup_.ecProbeHighPointB, sizeof(float));
+  memcpy(blob + 56, &setup_.ecProbeHighM, sizeof(float));
+  memcpy(blob + 60, &setup_.ecProbeHighB, sizeof(float));
   blob[64] = setup_.ecProbeHighPointsStored ? 1 : 0;
   Preferences preferences;
   if (!preferences.begin("cn0349", false)) return false;
@@ -243,10 +257,10 @@ InstrumentError CN0349Manager::setSetup(const InstrumentSetup& requested) {
       setup.pt100LinearCalibrationEnabled != setup_.pt100LinearCalibrationEnabled ||
       setup.pt100TemperatureA != setup_.pt100TemperatureA || setup.pt100ResistanceA != setup_.pt100ResistanceA ||
       setup.pt100TemperatureB != setup_.pt100TemperatureB || setup.pt100ResistanceB != setup_.pt100ResistanceB ||
-      setup.ecProbePointsStored != setup_.ecProbePointsStored || setup.ecProbeCalibrationEnabled != setup_.ecProbeCalibrationEnabled || setup.ecProbePointA != setup_.ecProbePointA ||
-      setup.ecProbePointB != setup_.ecProbePointB || setup.ecProbePointC != setup_.ecProbePointC ||
+      setup.ecProbePointsStored != setup_.ecProbePointsStored || setup.ecProbeCalibrationEnabled != setup_.ecProbeCalibrationEnabled || setup.ecProbeLowM != setup_.ecProbeLowM ||
+      setup.ecProbeLowB != setup_.ecProbeLowB || setup.ecProbePointC != setup_.ecProbePointC ||
       setup.ecProbeHighPointsStored != setup_.ecProbeHighPointsStored ||
-      setup.ecProbeHighPointA != setup_.ecProbeHighPointA || setup.ecProbeHighPointB != setup_.ecProbeHighPointB;
+      setup.ecProbeHighM != setup_.ecProbeHighM || setup.ecProbeHighB != setup_.ecProbeHighB;
   setup_ = setup;
   if (changed || setupPersistenceFailed_) setupPersistenceFailed_ = !saveSetup();
   if (frequencyChanged || rangeChanged) {
@@ -508,11 +522,9 @@ void CN0349Manager::finishCycle(bool cancelled) {
       double ec25 = ec / denominator;
       if (cycle_.setup.ecProbeCalibrationEnabled) {
         const bool high = cycle_.setup.ecRange == CN0349EcRange::High;
-        const double x1 = high ? cycle_.setup.ecProbeHighPointA : cycle_.setup.ecProbePointA;
-        const double x2 = high ? cycle_.setup.ecProbeHighPointB : cycle_.setup.ecProbePointB;
-        const double y1 = high ? 1413.0 : 147.0;
-        const double y2 = high ? 12880.0 : 1413.0;
-        ec25 = y1 + (ec25 - x1) * (y2 - y1) / (x2 - x1);
+        const double m = high ? cycle_.setup.ecProbeHighM : cycle_.setup.ecProbeLowM;
+        const double b = high ? cycle_.setup.ecProbeHighB : cycle_.setup.ecProbeLowB;
+        ec25 = m * ec25 + b;
       }
       if (isfinite(ec25) && ec25 >= 0 && ec25 <= 3.402823466e38) {
         cycle_.ec25MicroSiemens = static_cast<float>(ec25); cycle_.ec25Valid = true;

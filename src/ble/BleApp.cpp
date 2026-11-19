@@ -176,10 +176,10 @@ void BleApp::update() {
 void BleApp::publishEcProbePoints() {
   const InstrumentSetup setup = instrument_.getSetup();
   uint8_t payload[AtlantesBle::EC_PROBE_POINTS_SIZE] = {AtlantesBle::PROTOCOL_VERSION, static_cast<uint8_t>((setup.ecProbePointsStored ? 1 : 0) | (setup.ecProbeHighPointsStored ? 2 : 0))};
-  memcpy(payload + 2, &setup.ecProbePointA, sizeof(float));
-  memcpy(payload + 6, &setup.ecProbePointB, sizeof(float));
-  memcpy(payload + 10, &setup.ecProbeHighPointA, sizeof(float));
-  memcpy(payload + 14, &setup.ecProbeHighPointB, sizeof(float));
+  memcpy(payload + 2, &setup.ecProbeLowM, sizeof(float));
+  memcpy(payload + 6, &setup.ecProbeLowB, sizeof(float));
+  memcpy(payload + 10, &setup.ecProbeHighM, sizeof(float));
+  memcpy(payload + 14, &setup.ecProbeHighB, sizeof(float));
   payload[18] = static_cast<uint8_t>(setup.ecProbeCalibrationEnabled);
   if (hasLastEcProbePoints_ && memcmp(payload, lastEcProbePoints_, sizeof(payload)) == 0) return;
   memcpy(lastEcProbePoints_, payload, sizeof(payload)); hasLastEcProbePoints_ = true;
@@ -568,10 +568,10 @@ void BleApp::processSetupCommand() {
     setup.ecProbePointsStored = (command[2] & 1) != 0;
     setup.ecProbeHighPointsStored = (command[2] & 2) != 0;
     setup.ecProbeCalibrationEnabled = command[3] != 0;
-    memcpy(&setup.ecProbePointA, command + 4, sizeof(float));
-    memcpy(&setup.ecProbePointB, command + 8, sizeof(float));
-    memcpy(&setup.ecProbeHighPointA, command + 12, sizeof(float));
-    memcpy(&setup.ecProbeHighPointB, command + 16, sizeof(float));
+    memcpy(&setup.ecProbeLowM, command + 4, sizeof(float));
+    memcpy(&setup.ecProbeLowB, command + 8, sizeof(float));
+    memcpy(&setup.ecProbeHighM, command + 12, sizeof(float));
+    memcpy(&setup.ecProbeHighB, command + 16, sizeof(float));
     const InstrumentError error = instrument_.setSetup(setup);
     if (error == InstrumentError::None || error == InstrumentError::Persistence) {
       publishEcProbePoints();
