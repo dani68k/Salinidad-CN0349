@@ -120,9 +120,9 @@ struct InstrumentSetup {
   float pt100TemperatureB = 0, pt100ResistanceB = 0; ///< Punto B patrón, °C y Ω.
   bool ecProbePointsStored = false;
   bool ecProbeCalibrationEnabled = false;
-  float ecProbeLowM = 0, ecProbeLowB = 0, ecProbePointC = 0;
+  float ecProbeLowM = 0, ecProbeLowB = 0, ecProbePointC = 0, ecProbeLowQ = 0;
   bool ecProbeHighPointsStored = false;
-  float ecProbeHighM = 0, ecProbeHighB = 0;
+  float ecProbeHighM = 0, ecProbeHighB = 0, ecProbeHighQ = 0;
 };
 /** @brief Resultado individual de Pt100 o EC dentro de un ciclo. */
 struct SensorMeasurement {

@@ -106,24 +106,23 @@ bool CN0349Manager::validSetup(const InstrumentSetup& setup) {
       fabsf(setup.temperatureAlpha * 100.0f - roundf(setup.temperatureAlpha * 100.0f)) < 0.001f &&
       (!setup.temperatureCompensation || setup.sensors == MeasurementSensors::Both) && validPt100Calibration &&
       (!setup.ecProbeCalibrationEnabled || (setup.ecProbePointsStored && setup.ecProbeHighPointsStored)) &&
-      (!setup.ecProbePointsStored || (isfinite(setup.ecProbeLowM) && isfinite(setup.ecProbeLowB) &&
-       setup.ecProbeLowM > 0)) &&
-      (!setup.ecProbeHighPointsStored || (isfinite(setup.ecProbeHighM) && isfinite(setup.ecProbeHighB) &&
-       setup.ecProbeHighM > 0));
+      (!setup.ecProbePointsStored || (isfinite(setup.ecProbeLowQ) && isfinite(setup.ecProbeLowM) && isfinite(setup.ecProbeLowB))) &&
+      (!setup.ecProbeHighPointsStored || (isfinite(setup.ecProbeHighQ) && isfinite(setup.ecProbeHighM) && isfinite(setup.ecProbeHighB)));
 }
 
 void CN0349Manager::loadSetup() {
   Preferences preferences;
   if (!preferences.begin("cn0349", true)) return;
-  uint8_t blob[65]{};
+  uint8_t blob[73]{};
   const size_t length = preferences.getBytesLength("setup");
-  const bool read = (length == 12 || length == 17 || length == 20 || length == 34 || length == 38 || length == 42 || length == 55 || length == 56 || length == sizeof(blob)) &&
+  const bool read = (length == 12 || length == 17 || length == 20 || length == 34 || length == 38 || length == 42 || length == 55 || length == 56 || length == 65 || length == sizeof(blob)) &&
       preferences.getBytes("setup", blob, length) == length;
   preferences.end();
   if (!read || !((blob[0] == 1 && length == 12) || (blob[0] == 2 && length == 20) ||
       (blob[0] == 3 && length == 17) || (blob[0] == 4 && length == 34) ||
       (blob[0] == 5 && length == 38) || (blob[0] == 6 && length == 42) || (blob[0] == 7 && length == 55) ||
-      (blob[0] == 8 && length == 56) || ((blob[0] == 9 || blob[0] == 10 || blob[0] == 11) && length == sizeof(blob))) ||
+      (blob[0] == 8 && length == 56) || ((blob[0] == 9 || blob[0] == 10 || blob[0] == 11) && length == 65) ||
+      (blob[0] == 12 && length == sizeof(blob))) ||
       blob[1] < 1 || blob[1] > 3 || blob[2] > 1 || blob[3] > 2) return;
   InstrumentSetup candidate = setup_;
   candidate.sensors = static_cast<MeasurementSensors>(blob[1]);
@@ -138,7 +137,7 @@ void CN0349Manager::loadSetup() {
     if (blob[12] > 1) return;
     candidate.temperatureCompensation = blob[12] != 0;
     memcpy(&candidate.temperatureAlpha, blob + 13, sizeof(float));
-  } else if (blob[0] >= 4 && blob[0] <= 11) {
+  } else if (blob[0] >= 4 && blob[0] <= 12) {
     if (blob[12] > 1 || blob[17] > 1) return;
     candidate.temperatureCompensation = blob[12] != 0;
     memcpy(&candidate.temperatureAlpha, blob + 13, sizeof(float));
@@ -147,7 +146,7 @@ void CN0349Manager::loadSetup() {
     memcpy(&candidate.pt100ResistanceA, blob + 22, sizeof(float));
     memcpy(&candidate.pt100TemperatureB, blob + 26, sizeof(float));
     memcpy(&candidate.pt100ResistanceB, blob + 30, sizeof(float));
-    if (blob[0] >= 5 && blob[0] <= 11) {
+    if (blob[0] >= 5 && blob[0] <= 12) {
       candidate.frequencyHz = static_cast<uint32_t>(blob[34]) | (static_cast<uint32_t>(blob[35]) << 8) |
           (static_cast<uint32_t>(blob[36]) << 16) | (static_cast<uint32_t>(blob[37]) << 24);
       uint32_t code = 0;
@@ -155,7 +154,7 @@ void CN0349Manager::loadSetup() {
         candidate.frequencyHz = InstrumentSetup{}.frequencyHz;
       candidate.frequencyLowHz = candidate.frequencyHz;
       candidate.frequencyHighHz = candidate.frequencyHz;
-      if (blob[0] >= 6 && blob[0] <= 11) {
+      if (blob[0] >= 6 && blob[0] <= 12) {
         memcpy(&candidate.frequencyHighHz, blob + 38, sizeof(uint32_t));
         if (!AD5934::frequencyToCode(candidate.frequencyHighHz, ImpedanceApp::Profile{}.mclkHz, code))
           candidate.frequencyHighHz = InstrumentSetup{}.frequencyHighHz;
@@ -163,7 +162,7 @@ void CN0349Manager::loadSetup() {
       }
     }
   }
-  if (blob[0] >= 7 && blob[0] <= 11) {
+  if (blob[0] >= 7 && blob[0] <= 12) {
     if (blob[42] > 1) return;
     candidate.ecProbePointsStored = blob[42] != 0;
     memcpy(&candidate.ecProbeLowM, blob + 43, sizeof(float));
@@ -191,13 +190,17 @@ void CN0349Manager::loadSetup() {
         candidate.ecProbeHighB = static_cast<float>(1413.0 - candidate.ecProbeHighM * a);
       }
     }
+    if (blob[0] == 12) {
+      memcpy(&candidate.ecProbeLowQ, blob + 65, sizeof(float));
+      memcpy(&candidate.ecProbeHighQ, blob + 69, sizeof(float));
+    }
   }
   if (validSetup(candidate)) setup_ = candidate;
 }
 
 bool CN0349Manager::saveSetup() const {
-  uint8_t blob[65]{};
-  blob[0] = 11;
+  uint8_t blob[73]{};
+  blob[0] = 12;
   blob[1] = static_cast<uint8_t>(setup_.sensors);
   blob[2] = setup_.ecRange == CN0349EcRange::High ? 1 : 0;
   blob[3] = static_cast<uint8_t>(setup_.ecModel);
@@ -222,6 +225,8 @@ bool CN0349Manager::saveSetup() const {
   memcpy(blob + 56, &setup_.ecProbeHighM, sizeof(float));
   memcpy(blob + 60, &setup_.ecProbeHighB, sizeof(float));
   blob[64] = setup_.ecProbeHighPointsStored ? 1 : 0;
+  memcpy(blob + 65, &setup_.ecProbeLowQ, sizeof(float));
+  memcpy(blob + 69, &setup_.ecProbeHighQ, sizeof(float));
   Preferences preferences;
   if (!preferences.begin("cn0349", false)) return false;
   const bool written = preferences.putBytes("setup", blob, sizeof(blob)) == sizeof(blob);
@@ -260,7 +265,8 @@ InstrumentError CN0349Manager::setSetup(const InstrumentSetup& requested) {
       setup.ecProbePointsStored != setup_.ecProbePointsStored || setup.ecProbeCalibrationEnabled != setup_.ecProbeCalibrationEnabled || setup.ecProbeLowM != setup_.ecProbeLowM ||
       setup.ecProbeLowB != setup_.ecProbeLowB || setup.ecProbePointC != setup_.ecProbePointC ||
       setup.ecProbeHighPointsStored != setup_.ecProbeHighPointsStored ||
-      setup.ecProbeHighM != setup_.ecProbeHighM || setup.ecProbeHighB != setup_.ecProbeHighB;
+      setup.ecProbeHighM != setup_.ecProbeHighM || setup.ecProbeHighB != setup_.ecProbeHighB ||
+      setup.ecProbeLowQ != setup_.ecProbeLowQ || setup.ecProbeHighQ != setup_.ecProbeHighQ;
   setup_ = setup;
   if (changed || setupPersistenceFailed_) setupPersistenceFailed_ = !saveSetup();
   if (frequencyChanged || rangeChanged) {
@@ -524,7 +530,8 @@ void CN0349Manager::finishCycle(bool cancelled) {
         const bool high = cycle_.setup.ecRange == CN0349EcRange::High;
         const double m = high ? cycle_.setup.ecProbeHighM : cycle_.setup.ecProbeLowM;
         const double b = high ? cycle_.setup.ecProbeHighB : cycle_.setup.ecProbeLowB;
-        ec25 = m * ec25 + b;
+        const double a = high ? cycle_.setup.ecProbeHighQ : cycle_.setup.ecProbeLowQ;
+        ec25 = (a * ec25 + m) * ec25 + b;
       }
       if (isfinite(ec25) && ec25 >= 0 && ec25 <= 3.402823466e38) {
         cycle_.ec25MicroSiemens = static_cast<float>(ec25); cycle_.ec25Valid = true;

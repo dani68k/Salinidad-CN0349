@@ -25,6 +25,31 @@ Los ciclos cancelados no reemplazan las últimas lecturas.
 
 ## Setup y Calibration
 
+### Calibración de la sonda EC
+
+Setup permite introducir `a`, `b` y `c` para LOW y HIGH mediante la regresión
+polinómica de segundo grado de Excel. Utilizar como `x` las lecturas EC25 con
+compensación de temperatura activa y calibración de sonda desactivada; usar
+como `y` las conductividades de referencia en µS/cm. Con **Enable** activo,
+el instrumento calcula `EC25 corregida = a * EC25² + b * EC25 + c`. Los tres
+coeficientes deben ser finitos y se requieren ambos rangos para activar la
+corrección. Enable desactivado conserva los coeficientes sin aplicarlos.
+
+Las calibraciones lineales anteriores se cargan con `a = 0`, `b = m` y
+`c = b` de la recta original.
+
+### Calibración lineal anterior
+
+La versión lineal permitía introducir los coeficientes `m` y `b` obtenidos,
+por ejemplo, mediante regresión en Excel, por separado para LOW y HIGH. El
+ajuste se realiza con las lecturas EC25 sin corrección de sonda como `x` y
+los valores de referencia como `y`, ambos en µS/cm. Con **Enable** activo,
+el instrumento aplicaba `EC25 corregida = m * EC25 + b`; con Enable inactivo
+conservaba los coeficientes sin aplicarlos. Para activar la corrección se
+requerían ambos rangos, con `m` finita positiva y `b` finita.
+
+Esta descripción corresponde a la versión lineal anterior.
+
 Setup edita intervalo, rango, modelo, K, sensores y compensación. APPLY envía
 los cambios conjuntamente y espera confirmación; CANCEL restaura el último
 Setup confirmado. ON requiere Pt100 + EC; una selección incompatible muestra

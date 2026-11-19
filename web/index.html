@@ -174,13 +174,15 @@
             <div class="setup-footer"><button id="frequency-save" type="button" class="button primary" disabled>APPLY FREQUENCY</button></div>
           </section>
           <section class="pt100-calibration" aria-labelledby="ec-calibration-title">
-            <div class="card-heading"><div><p class="eyebrow">EC PROBE</p><h2 id="ec-calibration-title">Linear calibration</h2></div><label class="calibration-switch" for="ec-calibration-enabled"><input id="ec-calibration-enabled" type="checkbox" disabled><span>Enable</span></label></div>
-            <p class="hint">Enter the Excel regression coefficients for EC25: corrected EC25 = m * uncorrected EC25 + b (uS/cm). Use measurements with probe calibration OFF and temperature compensation ON.</p>
+            <div class="card-heading"><div><p class="eyebrow">EC PROBE</p><h2 id="ec-calibration-title">Quadratic calibration</h2></div><label class="calibration-switch" for="ec-calibration-enabled"><input id="ec-calibration-enabled" type="checkbox" disabled><span>Enable</span></label></div>
+            <p class="hint">Enter the Excel polynomial coefficients: corrected EC25 = a * EC25^2 + b * EC25 + c (uS/cm). Use EC25 readings with probe calibration OFF and temperature compensation ON as x, and reference values as y.</p>
             <div class="setup-grid ec-calibration-grid">
-              <label for="ec-calibration-low-m">LOW m<input id="ec-calibration-low-m" type="number" step="any" disabled></label>
-              <label for="ec-calibration-low-b">LOW b (uS/cm)<input id="ec-calibration-low-b" type="number" step="any" disabled></label>
-              <label for="ec-calibration-high-m">HIGH m<input id="ec-calibration-high-m" type="number" step="any" disabled></label>
-              <label for="ec-calibration-high-b">HIGH b (uS/cm)<input id="ec-calibration-high-b" type="number" step="any" disabled></label>
+              <label for="ec-calibration-low-a">LOW a<input id="ec-calibration-low-a" type="number" step="any" disabled></label>
+              <label for="ec-calibration-low-b">LOW b<input id="ec-calibration-low-b" type="number" step="any" disabled></label>
+              <label for="ec-calibration-low-c">LOW c (uS/cm)<input id="ec-calibration-low-c" type="number" step="any" disabled></label>
+              <label for="ec-calibration-high-a">HIGH a<input id="ec-calibration-high-a" type="number" step="any" disabled></label>
+              <label for="ec-calibration-high-b">HIGH b<input id="ec-calibration-high-b" type="number" step="any" disabled></label>
+              <label for="ec-calibration-high-c">HIGH c (uS/cm)<input id="ec-calibration-high-c" type="number" step="any" disabled></label>
             </div>
             <p id="ec-calibration-low-equation" class="hint" aria-live="polite"></p>
             <p id="ec-calibration-high-equation" class="hint" aria-live="polite"></p>

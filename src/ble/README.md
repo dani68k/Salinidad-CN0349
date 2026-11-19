@@ -60,6 +60,32 @@ notifica y no inicia calibraciones.
 
 ## Protocolo Setup
 
+### Coeficientes de sonda EC
+
+La calibración polinómica usa las características con sufijos UUID `0018`
+(READ + NOTIFY) y `0019` (WRITE), con el mismo sufijo de servicio que las
+demás características ATLANTES. La lectura ocupa 27 bytes: versión (0),
+máscara LOW/HIGH (1; bits 0/1), coeficientes `a`, `b`, `c` de LOW y HIGH
+como float32 little-endian en offsets 2, 6, 10, 14, 18 y 22, y Enable (26).
+La escritura ocupa 28 bytes: versión, requestId, máscara y Enable (0–3),
+seguidos de los seis float32 en offsets 4, 8, 12, 16, 20 y 24. El resultado
+se devuelve mediante SETUP_RESULT; `PERSISTENCE` indica aplicación en RAM
+sin guardado persistente.
+
+### Coeficientes lineales anteriores
+
+La interfaz lineal anterior utilizaba las características con sufijos UUID
+`0016` (READ + NOTIFY) y `0017` (WRITE), con el mismo sufijo de servicio que
+las demás características ATLANTES. La lectura tenía 19 bytes: versión (0),
+máscara de rangos LOW/HIGH (1; bits 0/1), `m LOW`, `b LOW`, `m HIGH` y
+`b HIGH` (float32 little-endian en offsets 2, 6, 10 y 14), y Enable (18).
+La escritura tenía 20 bytes: versión, requestId, máscara y Enable (offsets
+0–3), seguidos de los cuatro float32 en offsets 4, 8, 12 y 16. El resultado
+se devolvía mediante SETUP_RESULT; `PERSISTENCE` indicaba aplicación en RAM
+sin guardado persistente.
+
+Estos UUID corresponden a la versión lineal anterior.
+
 Características:
 
 - SETUP `8d7b0003-6f7a-4f31-9c4d-2b6e6a7f3a10`: READ + NOTIFY, 12 bytes.

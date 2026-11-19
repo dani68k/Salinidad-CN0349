@@ -33,7 +33,7 @@ sensores. Si la recta Pt100 está activa, exige que el punto A sea menor que B
 en temperatura y resistencia; las temperaturas deben estar entre −200 y 850 °C
 y las resistencias ser positivas. Así la pendiente m es positiva. La conversión
 lineal extrapola fuera de los puntos. Guarda los cambios en Preferences, namespace
-`cn0349`, blob versión 5; `loadSetup()` admite formatos anteriores con frecuencia
+`cn0349`, blob versión 12; `loadSetup()` admite formatos anteriores con frecuencia
 predeterminada de 2000 Hz. La frecuencia se valida mediante la conversión DDS con
 MCLK de 1 MHz (1–7812 Hz); si la frecuencia guardada no es válida se usa 2000 Hz.
 Al cambiarla se invalidan las calibraciones y se inicia una nueva calibración;
@@ -42,6 +42,32 @@ aplicado en RAM y se devuelve `Persistence`. No se escribe si no cambian los
 campos persistidos; las calibraciones electrónicas y mediciones no se persisten.
 
 ## Calibración y ciclos
+
+### Corrección de la sonda EC
+
+El Setup guarda tres coeficientes finitos por rango y un Enable común. Con la
+compensación de temperatura activa y ambas mediciones válidas, el rango activo
+aplica `EC25 corregida = a * EC25² + b * EC25 + c`. EC25 y `c` se expresan en
+µS/cm. Un resultado negativo, no finito o fuera del intervalo float32 no se
+publica como EC25 válido. Enable requiere ambos rangos configurados; cambiar
+la frecuencia invalida la calibración del rango afectado y desactiva Enable.
+
+Preferences guarda estos coeficientes en el formato 12. Las configuraciones
+lineales anteriores se cargan con `a = 0`, conservando pendiente y término
+independiente. Las calibraciones anteriores basadas en puntos se convierten
+primero a su recta equivalente.
+
+### Corrección lineal anterior
+
+La versión lineal guardaba `m` y `b` independientes para LOW y HIGH y un
+Enable común. Tras la compensación de temperatura aplicaba al rango activo
+`EC25 corregida = m * EC25 + b`, con EC25 y `b` en µS/cm. La corrección
+solo se calculaba con ambas mediciones válidas y compensación activa; un
+resultado negativo o no finito no se publicaba como EC25 válido. Se exigían
+coeficientes finitos, `m > 0` y ambos rangos configurados para Enable. Al
+cambiar la frecuencia de un rango se invalidaba su calibración y se
+desactivaba Enable. Los coeficientes se persistían en Preferences, formato 11.
+
 
 Se recogen cinco muestras por cada referencia HIGH_100R, HIGH_1K, LOW_1K y
 LOW_10K. Se generan GF legacy y, cuando los dos puntos de cada rango son
